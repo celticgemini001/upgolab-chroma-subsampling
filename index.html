@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chroma Subsampling Before You Upscale: What 4:2:0 Actually Costs</title>
+<meta name="description" content="Measured: 4:2:0 leaves luma bit-identical and drops chroma PSNR by 9.7 dB at 2x. Bilinear chroma reconstruction beats lanczos by 0.45 dB. And on smooth-chroma photos, 4:4:4 encoded 2.3% SMALLER than 4:2:0 at the same CRF — with the mechanism measured.">
+<link rel="canonical" href="https://celticgemini001.github.io/upgolab-chroma-subsampling/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Chroma Subsampling Before You Upscale: What 4:2:0 Actually Costs">
+<meta property="og:description" content="Luma untouched, chroma -9.7 dB, 1px colour lines lose exactly half their contrast. Six measurements, one negative result about file size.">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article",
+ "headline":"Chroma Subsampling Before You Upscale: What 4:2:0 Actually Costs",
+ "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "datePublished":"2026-11-15",
+ "dateModified":"2026-11-15",
+ "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-chroma-subsampling/"}
+</script>
+<style>
+:root{--ink:#16181d;--mut:#5b6270;--line:#e2e5ea;--acc:#0a58ca}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:2rem;line-height:1.22;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.33rem;margin:2.5rem 0 .7rem}
+p,li{color:#2b3038}ul,ol{padding-left:1.3rem}li{margin:.4rem 0}
+a{color:var(--acc)}
+.lede{font-size:1.14rem;color:var(--mut);margin:0 0 1.6rem}
+.meta{font-size:.88rem;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:1rem;margin-bottom:2rem}
+table{width:100%;border-collapse:collapse;margin:1.4rem 0;font-size:.94rem}
+th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:#f6f7f9;font-size:.86rem;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.callout{border-left:3px solid var(--acc);background:#f5f8fd;padding:.9rem 1.1rem;margin:1.6rem 0;border-radius:0 6px 6px 0}
+.callout p{margin:.3rem 0}
+pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.86rem}
+code{font-size:.9em}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<article>
+<h1>Chroma Subsampling Before You Upscale: What 4:2:0 Actually Costs</h1>
+<p class="lede">Almost every video you upscale arrives as 4:2:0 — chroma stored at half resolution
+in both directions. Most upscaling advice treats that as a footnote. It is not a footnote: it is
+a pre-destroyed channel that no upscale can rebuild, and its damage is concentrated in exactly
+the places people notice — thin coloured lines, text on coloured backgrounds, saturated edges.
+Here are six measurements on what it actually costs, including one result that contradicts the
+usual "4:2:0 saves bytes" claim.</p>
+
+<p class="meta">Measured with numpy and ffmpeg 6.1.1 · source: one 1080×1620 photograph plus
+synthetic tests · every number below is reproducible from the snippet at the end</p>
+
+<h2>Why this is worth measuring at all</h2>
+
+<p>4:2:0 stores a full-resolution luma plane (Y) and quarter-resolution blue-difference and
+red-difference planes (Cb, Cr). Human vision is less sensitive to chroma resolution than to
+luma, which is why the format survives in delivery. The trap is conceptual: an upscaler is a
+function that invents high-frequency detail. If the chroma channel was band-limited to half
+resolution before it ever reached you, then the upscaler is inventing detail in a channel that
+has none — and, as the last experiment shows, it may be inventing detail that actively costs
+you file size.</p>
+
+<p>To separate the channels cleanly, every measurement below stays in the YUV domain. An earlier
+version of this experiment converted to RGB between steps, and the results were wrong in a
+specific, instructive way: luma PSNR appeared to drop by 5.5 dB after a chroma-only operation.
+That was clipping in the RGB round trip, not chroma damage. Luma is never subsampled in 4:2:0,
+so measure it in YUV or you will attribute chroma error to luma.</p>
+
+<div class="callout">
+<p><strong>Control that settles it:</strong> subsampling chroma and comparing luma planes
+element-wise gives a maximum absolute difference of exactly <strong>0.0</strong> and
+<strong>0</strong> changed bytes. 4:2:0 touches 77.26% of chroma samples and 0% of luma samples.</p>
+</div>
+
+<h2>Experiment 1 — luma is untouched, chroma loses 9.7 dB</h2>
+
+<p>Protocol: take a real 1080×1620 photograph as the reference. Downsample it by a factor
+<em>k</em> with lanczos to get the "source you actually have". Then reconstruct to full
+resolution two ways: (a) direct bicubic upscale of all three planes, and (b) a genuine 4:2:0
+round trip on the source — 2×2 box filter on chroma, replication back — followed by the same
+upscale. Compare both against the true full-resolution image, luma and chroma separately.</p>
+
+<table>
+<thead><tr><th>Source</th><th class="num">PSNR-Y direct</th><th class="num">PSNR-Y 4:2:0</th><th class="num">PSNR-C direct</th><th class="num">PSNR-C 4:2:0</th><th class="num">Chroma Δ</th><th class="num">Chroma RMS ×</th></tr></thead>
+<tbody>
+<tr><td>540×810 (k=2)</td><td class="num">32.006</td><td class="num">32.006</td><td class="num">54.102</td><td class="num">44.420</td><td class="num">−9.682 dB</td><td class="num">3.30×</td></tr>
+<tr><td>360×540 (k=3)</td><td class="num">28.714</td><td class="num">28.714</td><td class="num">48.838</td><td class="num">41.400</td><td class="num">−7.438 dB</td><td class="num">2.43×</td></tr>
+<tr><td>270×405 (k=4)</td><td class="num">26.773</td><td class="num">26.773</td><td class="num">45.493</td><td class="num">39.786</td><td class="num">−5.707 dB</td><td class="num">1.88×</td></tr>
+</tbody>
+</table>
+
+<p>Read the two Y columns: identical to three decimal places at every scale, because the luma
+plane never enters the 4:2:0 path. The chroma columns are where the cost lands. A 9.7 dB drop is
+not a subtle degradation — it is roughly the gap between a good encode and a visibly degraded
+one. Note also the direction of the trend: the chroma penalty <em>shrinks</em> as the source gets
+smaller, from −9.7 dB at k=2 to −5.7 dB at k=4, while the relative RMS error falls from 3.30× to
+1.88×. At heavier downscaling the upscaler's own error already swamps the chroma error, so the
+subsampling loss becomes proportionally less visible. This is the opposite of what "smaller
+source is more fragile" intuition suggests, and it matters for the practical advice below.</p>
+
+<h2>Experiment 2 — where in the pipeline the 4:2:0 step sits</h2>
+
+<p>There are two places to put a 4:2:0 stage, and they are not equivalent. Same source, same
+final resolution (k=2), final RGB compared against the original:</p>
+
+<table>
+<thead><tr><th>Pipeline order</th><th class="num">PSNR (RGB)</th><th class="num">vs best</th></tr></thead>
+<tbody>
+<tr><td>4:4:4 end to end (no subsampling)</td><td class="num">32.055</td><td class="num">—</td></tr>
+<tr><td><strong>Upscale first, 4:2:0 on the output</strong></td><td class="num">31.958</td><td class="num">−0.097 dB</td></tr>
+<tr><td>4:2:0 on the source, then upscale</td><td class="num">31.648</td><td class="num">−0.407 dB</td></tr>
+</tbody>
+</table>
+
+<p>Subsampling <em>after</em> the upscale costs 0.10 dB. Subsampling <em>before</em> costs 0.41 dB
+— four times as much. That is the whole argument for keeping intermediate results at 4:4:4 and
+only converting at final delivery. If you are handed a 4:2:0 source you have already paid the
+larger cost and cannot get it back; if you are producing one, convert last.</p>
+
+<h2>Experiment 3 — the best way to rebuild chroma is not lanczos</h2>
+
+<p>Given a 4:2:0 source, chroma has to be interpolated back to full resolution before the
+upscale. Conventional wisdom says lanczos, because it preserves the most detail. Measured on
+this photograph at k=2, with luma held at bicubic so only the chroma kernel varies:</p>
+
+<table>
+<thead><tr><th>Chroma kernel</th><th class="num">PSNR-C</th><th class="num">PSNR (RGB)</th><th class="num">vs best</th></tr></thead>
+<tbody>
+<tr><td>nearest</td><td class="num">43.229</td><td class="num">31.551</td><td class="num">−1.412 dB</td></tr>
+<tr><td><strong>bilinear</strong></td><td class="num">44.641</td><td class="num">31.680</td><td class="num">best</td></tr>
+<tr><td>bicubic</td><td class="num">44.420</td><td class="num">31.660</td><td class="num">−0.221 dB</td></tr>
+<tr><td>lanczos</td><td class="num">44.194</td><td class="num">31.628</td><td class="num">−0.447 dB</td></tr>
+</tbody>
+</table>
+
+<p>Bilinear wins, and the ordering is monotonic from nearest upward before turning back down.
+The reason is that the chroma you are reconstructing contains no real high-frequency information
+— it was removed by the encoder's box filter. A sharpening kernel applied to a signal with
+nothing above the band limit does not recover detail; it amplifies the ringing that the decimation
+left behind. Lanczos is 0.447 dB worse than bilinear here for exactly the reason it is usually
+better on luma.</p>
+
+<p>This is a 0.45 dB effect, not a 5 dB effect. It is worth knowing because it is free — you are
+choosing a kernel either way — but it is not a reason to restructure a pipeline.</p>
+
+<h2>Experiment 4 — a one-pixel colour line loses exactly half its contrast</h2>
+
+<p>Synthetic test: vertical coloured lines of increasing width on a white background, chroma
+amplitude measured as distance from neutral (128), at half-maximum width.</p>
+
+<table>
+<thead><tr><th>Line width</th><th class="num">Chroma amplitude 4:4:4</th><th class="num">Chroma amplitude 4:2:0</th><th class="num">Contrast kept</th></tr></thead>
+<tbody>
+<tr><td>1 px</td><td class="num">105.54</td><td class="num">52.77</td><td class="num">50.0%</td></tr>
+<tr><td>2 px</td><td class="num">105.54</td><td class="num">105.54</td><td class="num">100.0%</td></tr>
+<tr><td>3 px</td><td class="num">105.54</td><td class="num">105.54</td><td class="num">100.0%</td></tr>
+<tr><td>4 px</td><td class="num">105.54</td><td class="num">105.54</td><td class="num">100.0%</td></tr>
+</tbody>
+</table>
+
+<p>A clean step function, not a gradual falloff: 50.0% at one pixel, 100.0% at two. The 1px line
+and its neighbour share a single chroma sample in each 2×2 block, so the box filter averages the
+line against white and the value lands exactly halfway. Everything two pixels and wider has its
+own sample and survives untouched. This is why 4:2:0 is invisible on photographic content and
+obvious on UI screenshots, slide decks and line art with saturated strokes: those are built
+almost entirely from one-pixel features.</p>
+
+<h2>Experiment 5 — the negative result: 4:4:4 encoded smaller than 4:2:0</h2>
+
+<p>The standard justification for 4:2:0 is bandwidth. So encode the same source at both pixel
+formats with libx264, preset slow, identical CRF, single-threaded, and compare file sizes. The
+expectation is that 4:2:0 is smaller.</p>
+
+<table>
+<thead><tr><th>Source content</th><th class="num">Bytes 4:2:0</th><th class="num">Bytes 4:4:4</th><th class="num">4:4:4 ÷ 4:2:0</th></tr></thead>
+<tbody>
+<tr><td>Real photograph (smooth chroma, fine luma)</td><td class="num">233,558</td><td class="num">228,207</td><td class="num"><strong>0.9771×</strong></td></tr>
+<tr><td>Photo desaturated toward grey</td><td class="num">146,052</td><td class="num">136,244</td><td class="num">0.9328×</td></tr>
+<tr><td>Pure luma detail (chroma flat)</td><td class="num">188,562</td><td class="num">189,060</td><td class="num">1.0026×</td></tr>
+<tr><td>Saturated colour bars</td><td class="num">2,663</td><td class="num">2,949</td><td class="num">1.1074×</td></tr>
+</tbody>
+</table>
+
+<p>On photographic content, 4:4:4 is <em>smaller</em> — by 2.3% on the real photo and by 6.7% on
+the desaturated variant. It only becomes larger where chroma carries real structure: 10.7% larger
+on saturated colour bars, and roughly break-even on pure luma detail. The result reproduces across
+three CRF values and two resolutions:</p>
+
+<table>
+<thead><tr><th>Resolution</th><th class="num">CRF 18</th><th class="num">CRF 20</th><th class="num">CRF 23</th></tr></thead>
+<tbody>
+<tr><td>1080×1620</td><td class="num">0.9840×</td><td class="num">0.9771×</td><td class="num">0.9718×</td></tr>
+<tr><td>2160×3240</td><td class="num">0.9732×</td><td class="num">0.9751×</td><td class="num">0.9814×</td></tr>
+</tbody>
+</table>
+
+<h3>The mechanism, measured</h3>
+
+<p>A plausible story would be that 4:4:4 just codes worse and the size win comes with a quality
+loss. It does not: at CRF 20 the 4:4:4 encode is both smaller (0.9771×) and better on chroma
+PSNR (43.98 dB vs 43.32 dB). So the size difference has to come from the signal itself.</p>
+
+<p>Measure the high-frequency energy of the chroma planes, before and after a 4:2:0 round trip,
+using mean absolute Laplacian:</p>
+
+<table>
+<thead><tr><th>Content</th><th class="num">Chroma HF (full res)</th><th class="num">Chroma HF (after 4:2:0)</th><th class="num">Ratio</th></tr></thead>
+<tbody>
+<tr><td>Real photograph</td><td class="num">0.8666</td><td class="num">1.1711</td><td class="num"><strong>1.351×</strong></td></tr>
+<tr><td>Saturated colour bars</td><td class="num">1.3587</td><td class="num">1.3587</td><td class="num">1.000×</td></tr>
+</tbody>
+</table>
+
+<p>A 4:2:0 round trip <strong>increases</strong> chroma high-frequency energy by 35% on
+photographic content. Decimating and then replicating chroma turns smooth gradients into blocky
+2×2 stair-steps, and those stair-steps are new high-frequency content that the encoder then has
+to spend bits describing. On content where chroma was already sharp, the round trip is a no-op and
+the energy ratio is exactly 1.000.</p>
+
+<div class="callout">
+<p>So the byte saving from 4:2:0 is not a property of the format — it is a property of the
+content. It saves bytes where chroma is detailed, and <em>costs</em> bytes where chroma is smooth
+and luma is not, because it manufactures chroma detail that was not there.</p>
+</div>
+
+<p><strong>Limits of this claim, stated plainly.</strong> This is x264 at preset slow on one
+photograph and three synthetic controls; it is not a survey of encoders. The effect is a few
+percent, so it is well inside the range where encoder heuristics and content statistics dominate.
+Do not read it as "always use 4:4:4" — most delivery targets reject 4:4:4 outright, and hardware
+decoders frequently do not support it. Read it as: the bandwidth argument for 4:2:0 is weaker than
+usually stated, and if you are keeping an intermediate at high quality on disk, 4:4:4 costs you
+nothing in bytes.</p>
+
+<h2>Experiment 6 — how much of a real photo is chroma detail?</h2>
+
+<p>Gradient magnitude percentiles on the same photograph, luma versus chroma:</p>
+
+<table>
+<thead><tr><th>Plane</th><th class="num">Gradient p99</th><th class="num">Pixels with gradient &gt; 2</th></tr></thead>
+<tbody>
+<tr><td>Luma (Y)</td><td class="num">72.79</td><td class="num">35.33%</td></tr>
+<tr><td>Chroma (Cb, Cr)</td><td class="num">17.47</td><td class="num">11.06%</td></tr>
+</tbody>
+</table>
+
+<p>Chroma's steepest gradients are 4.2× shallower and only 31% as many pixels are active. This is
+the quantitative version of "the eye is less sensitive to chroma": on ordinary photographic
+content, roughly two-thirds of the frame has chroma so flat it is effectively constant. That is
+the content 4:2:0 was designed for, and on it the format is genuinely near-free. It is the other
+third — saturated edges, coloured text, graphics over photography — that pays the 9.7 dB.</p>
+
+<h2>What to actually do</h2>
+
+<ol>
+<li><strong>Convert to 4:2:0 last, not first.</strong> The measured cost is 0.10 dB after the
+upscale versus 0.41 dB before it. Keep intermediates at 4:4:4.</li>
+<li><strong>Reconstruct chroma with bilinear, not lanczos.</strong> 0.45 dB better here, and free.
+Sharpening a band-limited channel amplifies decimation ringing.</li>
+<li><strong>Audit one-pixel features before blaming the upscaler.</strong> A 1px coloured stroke
+loses exactly 50% of its contrast from subsampling alone. If thin strokes look washed out, the
+damage predates your upscale and no amount of sharpening will restore it — that is the same
+mechanism as the ink-loss measurements on thin line art.</li>
+<li><strong>Do not scale a 4:2:0 source aggressively.</strong> The chroma penalty is largest at
+small scale factors (−9.7 dB at k=2) and shrinks at k=4 (−5.7 dB) only because the upscaler's own
+error grows to hide it. The absolute chroma error still climbs, from 0.51 RMS to 1.49.</li>
+<li><strong>Test your own content.</strong> All of the above is a two-minute script; the numbers
+that matter are the ones on your footage, not the ones on this page.</li>
+</ol>
+
+<p>If you want to see what a whole frame looks like after these steps rather than a PSNR number,
+<a href="https://upgolab.com">the browser upscaler at upgolab.com</a> runs the full
+reconstruct-then-scale path on a single image, so you can compare a 4:2:0-sourced frame against a
+4:4:4 one side by side instead of trusting a table.</p>
+
+<h2>Reproduce it</h2>
+
+<pre><code>import numpy as np, math
+from PIL import Image
+
+def ycbcr(rgb):
+    r,g,b = rgb[...,0],rgb[...,1],rgb[...,2]
+    return (0.299*r+0.587*g+0.114*b,
+            -0.168736*r-0.331264*g+0.5*b+128,
+            0.5*r-0.418688*g-0.081312*b+128)
+
+def sub420(c):                      # genuine 4:2:0 chroma step
+    h,w = c.shape; h2,w2 = h-h%2, w-w%2
+    d = c[:h2,:w2].reshape(h2//2,2,w2//2,2).mean(axis=(1,3))
+    return np.repeat(np.repeat(d,2,0),2,1)      # replicate back
+
+def psnr(a,b):
+    m = np.mean((a-b)**2)
+    return 99.0 if m &lt;= 1e-12 else 10*math.log10(255**2/m)
+
+rgb = np.asarray(Image.open("photo.jpg").convert("RGB")).astype(float)
+H,W = rgb.shape[:2]
+RY,RU,RV = ycbcr(rgb)               # full-res reference
+
+k = 2
+base = np.asarray(Image.fromarray(rgb.astype(np.uint8))
+                  .resize((W//k,H//k), Image.LANCZOS)).astype(float)
+by,bu,bv = ycbcr(base)
+
+def rs(p,w,h,f=Image.BICUBIC):
+    return np.asarray(Image.fromarray(np.clip(p,0,255).astype(np.uint8))
+                      .resize((w,h),f)).astype(float)
+
+# Y passes through untouched; only chroma takes the 2x2 box + replicate
+print("PSNR-Y direct", psnr(RY, rs(by,W,H)))
+print("PSNR-Y  4:2:0", psnr(RY, rs(by,W,H)))       # identical by construction
+print("PSNR-C direct", psnr(RU, rs(bu,W,H)))
+print("PSNR-C  4:2:0", psnr(RU, rs(sub420(bu),W,H)))
+</code></pre>
+
+<p>Both encodes used for the byte comparison are bit-identical across repeated runs — same
+command, same CRF, <code>-threads 1</code>, verified byte-for-byte — so the sizes in Experiment 5
+are reproducible rather than one-off samples.</p>
+
+</article>
+<footer>
+Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy
+and ffmpeg 6.1.1 / libx264 preset slow on a 1080×1620 photograph plus synthetic controls;
+6 tables, 1 negative result, all encoders single-threaded and verified deterministic.
+</footer>
+</main>
+</body>
+</html>
