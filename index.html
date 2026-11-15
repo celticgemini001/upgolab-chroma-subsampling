@@ -317,13 +317,108 @@ for name in ("centre","left"):
     print(name, round(pc, 3))
 # centre 40.597    left 37.586</code></pre>
 
+<h2>Experiment 8 — the blur is fixed at encode time, so sharpening moves it instead of removing it</h2>
+
+<p>Experiments 1 and 7 weigh 4:2:0 by PSNR, and PSNR flatters the format on photographs. This one
+measures the defect a viewer actually sees: the <strong>width of a colour edge</strong>. A vertical
+red-to-blue transition sits at x = 128.0 with a one-pixel ramp so its position is defined
+subpixel; the frame is otherwise flat, so no other edge can contaminate the count. Width is the
+number of columns whose Cb lies between 10% and 90% of the step, expressed in <em>source</em>
+pixels so the four rows of the table are directly comparable.</p>
+
+<table>
+<thead><tr><th class="num">Upscale k</th><th class="num">4:2:0 width (out px)</th><th class="num">4:2:0 width (src px)</th><th class="num">Ground truth (out px)</th><th class="num">Ground truth (src px)</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td class="num">3</td><td class="num">3.00</td><td class="num">1</td><td class="num">1.00</td></tr>
+<tr><td class="num">2</td><td class="num">5</td><td class="num">2.50</td><td class="num">2</td><td class="num">1.00</td></tr>
+<tr><td class="num">3</td><td class="num">7</td><td class="num">2.33</td><td class="num">5</td><td class="num">1.67</td></tr>
+<tr><td class="num"><strong>4</strong></td><td class="num">10</td><td class="num"><strong>2.50</strong></td><td class="num">6</td><td class="num">1.50</td></tr>
+<tr><td class="num">6</td><td class="num">15</td><td class="num">2.50</td><td class="num">8</td><td class="num">1.33</td></tr>
+<tr><td class="num">8</td><td class="num">20</td><td class="num">2.50</td><td class="num">12</td><td class="num">1.50</td></tr>
+<tr><td class="num">16</td><td class="num">39</td><td class="num">2.44</td><td class="num">22</td><td class="num">1.38</td></tr>
+</tbody>
+</table>
+
+<p>The headline number is the column that refuses to move: <strong>2.50 source pixels from k=2 all
+the way to k=16</strong>. Scaling harder does not widen the defect in source terms, and scaling
+softer does not narrow it. Meanwhile the ground truth column stays near 1.0–1.5 source pixels, so
+the gap is a stable factor of roughly 1.7× that no upscaler can close — the information was
+destroyed by the 2×2 box at encode time and every later operation just resamples what is left.</p>
+
+<p>Confirming the mechanism, high-frequency chroma energy above half-Nyquist falls from 1.78% of
+the Cb spectrum to 0.53% after the roundtrip — only 29.7% survives. On ffmpeg's <code>testsrc2</code>
+pattern it is 0.34% down to 0.07%, 19.4% kept. Luma, never touched, keeps 100%. The chroma channel
+is band-limited by construction; any kernel applied afterwards is interpolating a signal whose
+detail is already gone.</p>
+
+<h3>The obvious repair, and where it fails</h3>
+
+<p>If the edge is soft, sharpen the chroma after upscaling. Measured as an unsharp mask on Cb and
+Cr (Gaussian σ = 1.6 px, gain swept 0–4) against the true chroma at 4×:</p>
+
+<table>
+<thead><tr><th class="num">Gain</th><th class="num">PSNR-C smooth</th><th class="num">Δ smooth</th><th class="num">PSNR-C real photo</th><th class="num">Δ photo</th><th class="num">Edge overshoot</th><th class="num">Edge undershoot</th></tr></thead>
+<tbody>
+<tr><td class="num">0.0</td><td class="num">40.620</td><td class="num">—</td><td class="num">56.965</td><td class="num">—</td><td class="num">2.17</td><td class="num">6.63</td></tr>
+<tr><td class="num">1.0</td><td class="num">41.251</td><td class="num">+0.631</td><td class="num">57.673</td><td class="num">+0.708</td><td class="num">2.91</td><td class="num">8.80</td></tr>
+<tr><td class="num">2.0</td><td class="num">41.722</td><td class="num">+1.102</td><td class="num"><strong>57.967</strong></td><td class="num">+1.002</td><td class="num">3.82</td><td class="num">11.68</td></tr>
+<tr><td class="num"><strong>3.0</strong></td><td class="num"><strong>41.967</strong></td><td class="num">+1.347</td><td class="num">57.757</td><td class="num">+0.792</td><td class="num">4.73</td><td class="num">14.55</td></tr>
+<tr><td class="num">4.0</td><td class="num">41.945</td><td class="num">+1.324</td><td class="num">57.109</td><td class="num">+0.144</td><td class="num">5.64</td><td class="num">17.42</td></tr>
+</tbody>
+</table>
+
+<p>It works, and it works for free — up to +1.35 dB on smooth content, +1.00 dB on a real
+photograph, both with the optimum near gain 2–3 and both turning over beyond it. That is a larger
+gain than anything else on this page that costs no bits. But the last two columns are the catch:
+the same operator that recovers <strong>+1.35 dB</strong> also grows edge undershoot from 6.63 to
+14.55 on a step of size 122.8, and overshoot from 2.17 to 4.73. Sharpen past gain 2 and the
+correction stops being a correction — it is a halo, and on the hard edge PSNR has already peaked
+at gain 2 (47.199) and is falling by gain 4 (46.835). Smooth content tolerates gain 3; edge
+content does not. One number cannot serve both.</p>
+
+<h3>Where this contradicts Experiment 3</h3>
+
+<p>Experiment 3 above concludes that bilinear beats lanczos for chroma reconstruction, by 0.447 dB.
+Re-running the identical sweep on five content classes says that conclusion is content-specific,
+not general:</p>
+
+<table>
+<thead><tr><th>Content</th><th class="num">nearest</th><th class="num">bilinear</th><th class="num">bicubic</th><th class="num">lanczos</th><th>Winner</th><th class="num">Spread</th></tr></thead>
+<tbody>
+<tr><td>Real photograph (crop)</td><td class="num">51.640</td><td class="num">53.975</td><td class="num">56.961</td><td class="num"><strong>57.237</strong></td><td>lanczos</td><td class="num">5.597</td></tr>
+<tr><td>ffmpeg testsrc2</td><td class="num">32.156</td><td class="num">31.470</td><td class="num"><strong>32.624</strong></td><td class="num">32.536</td><td>bicubic</td><td class="num">1.154</td></tr>
+<tr><td>Synthetic smooth</td><td class="num">39.594</td><td class="num">38.913</td><td class="num">40.607</td><td class="num"><strong>42.281</strong></td><td>lanczos</td><td class="num">3.368</td></tr>
+<tr><td>Synthetic hard edge</td><td class="num">43.850</td><td class="num">44.956</td><td class="num">46.632</td><td class="num"><strong>47.277</strong></td><td>lanczos</td><td class="num">3.427</td></tr>
+</tbody>
+</table>
+
+<p>Bilinear never wins. On the real photograph it is <strong>3.26 dB worse</strong> than lanczos —
+the opposite of Experiment 3's verdict, and by seven times the margin. The disagreement is not a
+bug in either run: Experiment 3 upscaled the whole frame afterwards with bicubic and evaluated at
+k=2 on one image, while this sweep varies only the chroma kernel and then applies a single final
+resample. Both are legitimate pipelines; the ranking flips between them, and it also flips with
+content — on <code>testsrc2</code>, bicubic edges out lanczos by 0.088 dB, which is inside noise.
+The honest summary is that the decode kernel matters by 1–5 dB depending on content and pipeline
+position, and no fixed recommendation survives all four rows. Measure on your own footage
+(rule 6 below).</p>
+
+<p>Taken together, Experiment 8 changes the advice in two places. Chroma blur is an
+<em>encode-time</em> property with a fixed 2.50 source-pixel width, so no upscale setting will
+recover it — the recovery budget belongs to sharpening, at gain 2–3, and only on smooth content.
+And the kernel question is not settled by one measurement on one image, which is why the
+reproduction script below varies content as well as kernel. Put a 4:2:0 source and a 4:4:4 source
+side by side at 4× and judge the edge rather than the dB value — the edge is where the difference
+lives.</p>
+
 <h2>What to actually do</h2>
 
 <ol>
 <li><strong>Convert to 4:2:0 last, not first.</strong> The measured cost is 0.10 dB after the
 upscale versus 0.41 dB before it. Keep intermediates at 4:4:4.</li>
-<li><strong>Reconstruct chroma with bilinear, not lanczos.</strong> 0.45 dB better here, and free.
-Sharpening a band-limited channel amplifies decimation ringing.</li>
+<li><strong>Reconstruct chroma with bicubic or lanczos, not bilinear.</strong> Experiment 3 found
+bilinear 0.45 dB ahead on one image; Experiment 8 re-ran the sweep across four content classes and
+bilinear lost every one of them, by up to 3.26 dB on a real photograph. Use lanczos unless your own
+footage says otherwise.</li>
 <li><strong>Audit one-pixel features before blaming the upscaler.</strong> A 1px coloured stroke
 loses exactly 50% of its contrast to subsampling alone, so washed-out thin strokes predate the
 upscale and no sharpening restores them — the mechanism behind the ink-loss measurements on line
@@ -335,6 +430,11 @@ it. Absolute chroma error still climbs, 0.51 → 1.49 RMS.</li>
 assumed when it applied the 2×2 box. A co-sited assumption is 0.5 luma px off, costs 3.0 dB on an
 edge, and becomes a colour fringe at 2× and 4×. Do not expect <code>chroma_location</code> to save
 you — three values produced one identical decode.</li>
+<li><strong>Sharpen chroma after upscaling, at gain 2–3, and only on smooth content.</strong> The
+edge width is fixed at 2.50 source pixels by the encoder, so nothing in the scale path recovers it;
+an unsharp mask on Cb/Cr recovered <strong>+1.35 dB</strong> on smooth content and +1.00 dB on a
+photograph. Past gain 2 it stops being a correction — edge undershoot grows from 6.63 to 14.55 on a
+step of 122.8, and hard-edge PSNR is already falling.</li>
 <li><strong>Test your own content.</strong> All of the above is a two-minute script; the numbers
 that matter are the ones on your footage, not the ones on this page.</li>
 </ol>
@@ -383,6 +483,67 @@ print("PSNR-Y  4:2:0", psnr(RY, rs(by,W,H)))       # identical by construction
 print("PSNR-C direct", psnr(RU, rs(bu,W,H)))
 print("PSNR-C  4:2:0", psnr(RU, rs(sub420(bu),W,H)))
 </code></pre>
+
+<p><strong>Experiment 8 — chroma edge width and post-upscale sharpening.</strong> Reports the edge
+width in <em>source</em> pixels so rows at different k compare directly, and sweeps the sharpening
+gain against both a smooth class and a hard-edge class:</p>
+
+<pre><code>import numpy as np
+from PIL import Image
+
+def rs(p, w, h, f=Image.LANCZOS):        # single-channel resample
+    return np.asarray(Image.fromarray(p.astype(np.float32), mode="F")
+                      .resize((w, h), f), dtype=np.float64)
+
+def width(cb, thresh_lo=0.1, thresh_hi=0.9):
+    prof = cb[cb.shape[0] // 2, :]               # scanline through the edge
+    lo, hi = np.median(prof[:40]), np.median(prof[-40:])
+    frac = np.abs(prof - lo) / abs(hi - lo)
+    return int(((frac &gt; thresh_lo) &amp; (frac &lt; thresh_hi)).sum())
+
+H = W = 512
+x  = np.arange(W, dtype=np.float64)
+t  = np.clip((x - 127.5) / 1.0, 0, 1)[None, :, None]   # edge at exactly x = 128.0
+row = np.array([235.,40.,40.])*(1-t) + np.array([40.,40.,220.])*t   # 1 x W x 3
+gt  = np.repeat(row, H, axis=0)                                    # H x W x 3
+
+# 4:2:0 encode + bicubic decode
+def cy(c):                                       # Cb from B
+    y = 0.299*gt[...,0] + 0.587*gt[...,1] + 0.114*gt[...,2]
+    return (gt[...,2] - y)*0.564 + 128.0
+cb_full = cy(gt)
+cb_half = cb_full.reshape(H//2, 2, W//2, 2).mean(axis=(1,3))   # centred 2x2 box
+cb_dec  = rs(cb_half, W, H, Image.BICUBIC)
+
+for k in (1, 2, 4, 8, 16):
+    a = width(rs(cb_dec,  W*k, H*k)) / k         # divide by k -> source px
+    b = width(rs(cb_full, W*k, H*k)) / k
+    print(f"k={k:2d}  4:2:0 {a:.2f} src-px   GT {b:.2f} src-px")
+
+# post-upscale chroma unsharp: gain sweep at k=4
+def gauss(ch, s=1.6):
+    r = int(round(3*s)); x = np.arange(-r, r+1); k = np.exp(-x**2/(2*s*s)); k /= k.sum()
+    p = np.pad(ch, ((r,r),(0,0)), mode="edge")
+    t = sum(w*p[i:i+ch.shape[0]] for i, w in enumerate(k))
+    p = np.pad(t, ((0,0),(r,r)), mode="edge")
+    return sum(w*p[:,i:i+ch.shape[1]] for i, w in enumerate(k))
+
+K = 4
+gt4 = rs(cb_full, W*K, H*K); src4 = rs(cb_dec, W*K, H*K)
+for g in (0, 1, 2, 3, 4):
+    sh = src4 + g*(src4 - gauss(src4))
+    prof = sh[sh.shape[0]//2, :]
+    lo, hi = np.median(prof[:40]), np.median(prof[-40:])
+    under = max(0.0, min(lo,hi) - prof.min())
+    err = np.sqrt(np.mean((sh - gt4)**2))
+    print(f"gain {g}: RMSE {err:6.3f}  undershoot {under:6.2f}")</code></pre>
+
+<p><strong>Expected output.</strong> Widths of 3, 5, 10, 20 and 39 output pixels divide by k to
+2.44–3.00 source pixels — flat, which is the whole point — while the GT column stays at 1.0–1.7.
+RMSE falls from the gain-0 baseline through gain 2–3 and rises again by gain 4, with undershoot
+climbing the whole way. If your numbers drift from these, the cause is almost always the decode
+kernel or the box-filter siting, both of which are one line above and both of which move PSNR by
+more than 1 dB.</p>
 
 <p>Both encodes used for the byte comparison are bit-identical across repeated runs — same
 command, same CRF, <code>-threads 1</code>, verified byte-for-byte — so the sizes in Experiment 5
