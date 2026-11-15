@@ -48,8 +48,8 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-
 in both directions. Most upscaling advice treats that as a footnote. It is not a footnote: it is
 a pre-destroyed channel that no upscale can rebuild, and its damage is concentrated in exactly
 the places people notice — thin coloured lines, text on coloured backgrounds, saturated edges.
-Here are six measurements on what it actually costs, including one result that contradicts the
-usual "4:2:0 saves bytes" claim.</p>
+Here are seven measurements on what it actually costs, including one result that contradicts the
+usual "4:2:0 saves bytes" claim and a half-pixel defect that every whole-frame metric passes.</p>
 
 <p class="meta">Measured with numpy and ffmpeg 6.1.1 · source: one 1080×1620 photograph plus
 synthetic tests · every number below is reproducible from the snippet at the end</p>
@@ -253,6 +253,76 @@ content, roughly two-thirds of the frame has chroma so flat it is effectively co
 the content 4:2:0 was designed for, and on it the format is genuinely near-free. It is the other
 third — saturated edges, coloured text, graphics over photography — that pays the 9.7 dB.</p>
 
+<h2>Experiment 7 — the half-pixel that is metadata, not data</h2>
+
+<p>Everything above treats 4:2:0 as a resolution loss. There is a second cost rarely mentioned:
+<em>where</em> the surviving chroma samples sit relative to luma. The format does not fix that
+position. Two conventions exist — <strong>centred</strong> on the 2×2 block (JPEG, x264, ffmpeg's
+default) and <strong>co-sited</strong> with the top-left luma pixel ("left", from MPEG‑2). The gap
+is exactly 0.5 luma pixels and lives entirely in the interpretation; the sample values are
+identical.</p>
+
+<table>
+<thead><tr><th>Measurement</th><th class="num">Centred (correct)</th><th class="num">Co-sited (wrong)</th><th class="num">Cost</th></tr></thead>
+<tbody>
+<tr><td>PSNR-C, photograph, k=2</td><td class="num">26.503</td><td class="num">26.486</td><td class="num">−0.017 dB</td></tr>
+<tr><td>PSNR-C, photograph, k=3 / k=4</td><td class="num">26.600 / 26.557</td><td class="num">26.587 / 26.545</td><td class="num">−0.012 dB</td></tr>
+<tr><td>PSNR-C, controlled edge at x = 128.0</td><td class="num">40.597</td><td class="num">37.586</td><td class="num">−3.010 dB</td></tr>
+<tr><td>Recovered edge, 1× / 2× / 4×</td><td class="num">128.00 / 256.00 / 512.00</td><td class="num">127.50 / 255.00 / 510.00</td><td class="num">−0.5 / −1 / −2 px</td></tr>
+</tbody>
+</table>
+
+<p>The first two rows and the third contradict each other on purpose, and the contradiction is the
+finding. On the photograph the wrong decode costs <strong>0.017 dB</strong> — five hundred times
+less than the 9.7 dB of Experiment 1, far below any automated gate. On a controlled edge whose
+position is known (a 1px ramp at x = 128.0, subsampled with the 2×2 box, which <em>is</em> centred
+siting by construction) the same error costs <strong>3.0 dB</strong> and lands half a pixel left.
+Whole-frame PSNR averages the defect over the 53% of the frame that is chroma-flat and dilutes it
+into nothing.</p>
+
+<p>Regressing the difference between the two reconstructions against the horizontal gradient of the
+correct one gives r = <strong>0.776</strong>: to first order the error is a pure 0.25-chroma-pixel
+shift. That is why it behaves geometrically, not photometrically — it doubles with every doubling of
+output size, from half a pixel natively to a two-pixel fringe at 4×, where it looks exactly like bad
+chroma upsampling and gets "fixed" with sharpening that cannot work, because the edge is displaced,
+not soft.</p>
+
+<p>Two things I expected to work, and measured that they do not. <strong>Channel-difference metering
+is blind to it:</strong> phase-correlating R against B on a 2× upscale gives <code>dy=0, dx=0</code>
+under both hypotheses, because a siting error moves Cb and Cr <em>together</em> whereas aberration
+moves them apart. <strong>The metadata flag does not protect you:</strong> encoding one frame with
+<code>-chroma_sample_location left|center|topleft</code> gives three VUI values and <em>one identical
+md5</em> after decoding to raw YUV — and again as rgb24. The flag propagates through stream copy, mkv
+remux and a rescale re-encode; no decoder tested applies it. The 1-byte size difference is the VUI
+bit pattern, not picture data. (Scope: libx264, one frame, ffmpeg 6.1.1's own swscale — a hardware
+decoder that honours the VUI could differ.)</p>
+
+<pre><code># luma pixel i spans [i, i+1); chroma sample j sits at luma coord 2j + c
+#   c = 1.0 -> centred (x264/JPEG)      c = 0.5 -> left (MPEG-2)
+SITING = {"centre": 1.0, "left": 0.5}
+
+def up_chroma(d, H, W, siting):
+    h, w = d.shape; c = SITING[siting]
+    vy = np.clip((np.arange(H)+0.5-c)/2.0, 0, h-1)
+    vx = np.clip((np.arange(W)+0.5-c)/2.0, 0, w-1)
+    y0, x0 = np.floor(vy).astype(int), np.floor(vx).astype(int)
+    y1, x1 = np.minimum(y0+1,h-1), np.minimum(x0+1,w-1)
+    wy, wx = (vy-y0)[:,None], (vx-x0)[None,:]
+    return (d[np.ix_(y0,x0)]*(1-wx)+d[np.ix_(y0,x1)]*wx)*(1-wy) \
+         + (d[np.ix_(y1,x0)]*(1-wx)+d[np.ix_(y1,x1)]*wx)*wy
+
+# the 2x2 box in sub420() IS centred siting, so only "centre" can win here
+t   = np.clip(np.arange(256)+0.5-128.0+0.5, 0, 1)   # edge at exactly x=128.0
+img = np.zeros((64,256,3))
+for ch,(lo,hi) in enumerate([(40,220),(60,30),(200,40)]):
+    img[...,ch] = (lo*(1-t)+hi*t)[None,:]
+GY,GU,GV = ycbcr(img); du,dv = sub420(GU),sub420(GV)
+for name in ("centre","left"):
+    pc = (psnr(GU, up_chroma(du,64,256,name))
+        + psnr(GV, up_chroma(dv,64,256,name))) / 2
+    print(name, round(pc, 3))
+# centre 40.597    left 37.586</code></pre>
+
 <h2>What to actually do</h2>
 
 <ol>
@@ -267,6 +337,10 @@ mechanism as the ink-loss measurements on thin line art.</li>
 <li><strong>Do not scale a 4:2:0 source aggressively.</strong> The chroma penalty is largest at
 small scale factors (−9.7 dB at k=2) and shrinks at k=4 (−5.7 dB) only because the upscaler's own
 error grows to hide it. The absolute chroma error still climbs, from 0.51 RMS to 1.49.</li>
+<li><strong>Use centred chroma siting when you resample yourself.</strong> It is what the encoder
+assumed when it applied the 2×2 box. A co-sited assumption is 0.5 luma px off, costs 3.0 dB on an
+edge, and becomes a colour fringe at 2× and 4×. Do not expect <code>chroma_location</code> to save
+you — three values produced one identical decode.</li>
 <li><strong>Test your own content.</strong> All of the above is a two-minute script; the numbers
 that matter are the ones on your footage, not the ones on this page.</li>
 </ol>
@@ -324,7 +398,7 @@ are reproducible rather than one-off samples.</p>
 <footer>
 Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy
 and ffmpeg 6.1.1 / libx264 preset slow on a 1080×1620 photograph plus synthetic controls;
-6 tables, 1 negative result, all encoders single-threaded and verified deterministic.
+12 tables, 3 negative results, all encoders single-threaded and verified deterministic.
 
 <style>
 .sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
