@@ -56,19 +56,16 @@ synthetic tests · every number below is reproducible from the snippet at the en
 
 <h2>Why this is worth measuring at all</h2>
 
-<p>4:2:0 stores a full-resolution luma plane (Y) and quarter-resolution blue-difference and
-red-difference planes (Cb, Cr). Human vision is less sensitive to chroma resolution than to
-luma, which is why the format survives in delivery. The trap is conceptual: an upscaler is a
-function that invents high-frequency detail. If the chroma channel was band-limited to half
-resolution before it ever reached you, then the upscaler is inventing detail in a channel that
-has none — and, as the last experiment shows, it may be inventing detail that actively costs
-you file size.</p>
+<p>4:2:0 stores full-resolution luma (Y) and quarter-resolution Cb/Cr. Human vision is less
+sensitive to chroma resolution, which is why the format survives in delivery. The trap is
+conceptual: an upscaler invents high-frequency detail, so if chroma was band-limited to half
+resolution before it reached you, the upscaler is inventing detail in a channel that has none — and
+may be inventing detail that costs you file size.</p>
 
-<p>To separate the channels cleanly, every measurement below stays in the YUV domain. An earlier
-version of this experiment converted to RGB between steps, and the results were wrong in a
-specific, instructive way: luma PSNR appeared to drop by 5.5 dB after a chroma-only operation.
-That was clipping in the RGB round trip, not chroma damage. Luma is never subsampled in 4:2:0,
-so measure it in YUV or you will attribute chroma error to luma.</p>
+<p>Every measurement below stays in the YUV domain. An earlier version converted to RGB between
+steps and the results were wrong in an instructive way: luma PSNR appeared to drop 5.5 dB after a
+chroma-only operation — that was clipping in the RGB round trip, not chroma damage. Luma is never
+subsampled in 4:2:0, so measure it in YUV or you will attribute chroma error to luma.</p>
 
 <div class="callout">
 <p><strong>Control that settles it:</strong> subsampling chroma and comparing luma planes
@@ -94,18 +91,16 @@ upscale. Compare both against the true full-resolution image, luma and chroma se
 </table>
 
 <p>Read the two Y columns: identical to three decimal places at every scale, because the luma
-plane never enters the 4:2:0 path. The chroma columns are where the cost lands. A 9.7 dB drop is
-not a subtle degradation — it is roughly the gap between a good encode and a visibly degraded
-one. Note also the direction of the trend: the chroma penalty <em>shrinks</em> as the source gets
-smaller, from −9.7 dB at k=2 to −5.7 dB at k=4, while the relative RMS error falls from 3.30× to
-1.88×. At heavier downscaling the upscaler's own error already swamps the chroma error, so the
-subsampling loss becomes proportionally less visible. This is the opposite of what "smaller
-source is more fragile" intuition suggests, and it matters for the practical advice below.</p>
+plane never enters the 4:2:0 path. The chroma columns are where the cost lands — 9.7 dB is roughly
+the gap between a good encode and a visibly degraded one. Note the trend: the penalty
+<em>shrinks</em> from −9.7 dB at k=2 to −5.7 dB at k=4 while relative RMS error falls 3.30× → 1.88×,
+because at heavier downscaling the upscaler's own error swamps the chroma error. That is the
+opposite of the "smaller source is more fragile" intuition.</p>
 
 <h2>Experiment 2 — where in the pipeline the 4:2:0 step sits</h2>
 
-<p>There are two places to put a 4:2:0 stage, and they are not equivalent. Same source, same
-final resolution (k=2), final RGB compared against the original:</p>
+<p>Two places to put a 4:2:0 stage, and they are not equivalent. Same source, same final
+resolution (k=2), final RGB against the original:</p>
 
 <table>
 <thead><tr><th>Pipeline order</th><th class="num">PSNR (RGB)</th><th class="num">vs best</th></tr></thead>
@@ -137,12 +132,10 @@ this photograph at k=2, with luma held at bicubic so only the chroma kernel vari
 </tbody>
 </table>
 
-<p>Bilinear wins, and the ordering is monotonic from nearest upward before turning back down.
-The reason is that the chroma you are reconstructing contains no real high-frequency information
-— it was removed by the encoder's box filter. A sharpening kernel applied to a signal with
-nothing above the band limit does not recover detail; it amplifies the ringing that the decimation
-left behind. Lanczos is 0.447 dB worse than bilinear here for exactly the reason it is usually
-better on luma.</p>
+<p>Bilinear wins, monotonic from nearest upward then back down. The chroma being reconstructed
+contains no real high-frequency information — the encoder's box filter removed it — so a sharpening
+kernel applied to a band-limited signal recovers no detail; it amplifies the decimation's ringing.
+Lanczos is 0.447 dB worse than bilinear here for exactly the reason it is usually better on luma.</p>
 
 <p>This is a 0.45 dB effect, not a 5 dB effect. It is worth knowing because it is free — you are
 choosing a kernel either way — but it is not a reason to restructure a pipeline.</p>
@@ -165,9 +158,8 @@ amplitude measured as distance from neutral (128), at half-maximum width.</p>
 <p>A clean step function, not a gradual falloff: 50.0% at one pixel, 100.0% at two. The 1px line
 and its neighbour share a single chroma sample in each 2×2 block, so the box filter averages the
 line against white and the value lands exactly halfway. Everything two pixels and wider has its
-own sample and survives untouched. This is why 4:2:0 is invisible on photographic content and
-obvious on UI screenshots, slide decks and line art with saturated strokes: those are built
-almost entirely from one-pixel features.</p>
+own sample and survives untouched. Hence 4:2:0 is invisible on photographic content and
+obvious on UI screenshots, slide decks and line art: those are built from one-pixel features.</p>
 
 <h2>Experiment 5 — the negative result: 4:4:4 encoded smaller than 4:2:0</h2>
 
@@ -222,18 +214,16 @@ to spend bits describing. On content where chroma was already sharp, the round t
 the energy ratio is exactly 1.000.</p>
 
 <div class="callout">
-<p>So the byte saving from 4:2:0 is not a property of the format — it is a property of the
-content. It saves bytes where chroma is detailed, and <em>costs</em> bytes where chroma is smooth
-and luma is not, because it manufactures chroma detail that was not there.</p>
+<p>So the byte saving is not a property of the format but of the content: it saves bytes where
+chroma is detailed and <em>costs</em> them where chroma is smooth, because it manufactures chroma
+detail that was not there.</p>
 </div>
 
-<p><strong>Limits of this claim, stated plainly.</strong> This is x264 at preset slow on one
-photograph and three synthetic controls; it is not a survey of encoders. The effect is a few
-percent, so it is well inside the range where encoder heuristics and content statistics dominate.
-Do not read it as "always use 4:4:4" — most delivery targets reject 4:4:4 outright, and hardware
-decoders frequently do not support it. Read it as: the bandwidth argument for 4:2:0 is weaker than
-usually stated, and if you are keeping an intermediate at high quality on disk, 4:4:4 costs you
-nothing in bytes.</p>
+<p><strong>Limits, stated plainly.</strong> x264 at preset slow, one photograph and three
+synthetic controls — not a survey of encoders. The effect is a few percent, inside the range where
+encoder heuristics dominate. It is not "always use 4:4:4": most delivery targets reject 4:4:4 and
+hardware decoders often lack it. It is that the bandwidth argument for 4:2:0 is weaker than stated,
+and a high-quality intermediate kept at 4:4:4 costs nothing in bytes.</p>
 
 <h2>Experiment 6 — how much of a real photo is chroma detail?</h2>
 
@@ -247,20 +237,19 @@ nothing in bytes.</p>
 </tbody>
 </table>
 
-<p>Chroma's steepest gradients are 4.2× shallower and only 31% as many pixels are active. This is
-the quantitative version of "the eye is less sensitive to chroma": on ordinary photographic
-content, roughly two-thirds of the frame has chroma so flat it is effectively constant. That is
-the content 4:2:0 was designed for, and on it the format is genuinely near-free. It is the other
-third — saturated edges, coloured text, graphics over photography — that pays the 9.7 dB.</p>
+<p>Chroma's steepest gradients are 4.2× shallower and only 31% as many pixels are active — the
+quantitative version of "the eye is less sensitive to chroma". Roughly two-thirds of a photograph
+has chroma so flat it is effectively constant: the content 4:2:0 was designed for, where the format
+is near-free. The other third — saturated edges, coloured text, graphics over photos — pays the
+9.7 dB.</p>
 
 <h2>Experiment 7 — the half-pixel that is metadata, not data</h2>
 
 <p>Everything above treats 4:2:0 as a resolution loss. There is a second cost rarely mentioned:
-<em>where</em> the surviving chroma samples sit relative to luma. The format does not fix that
-position. Two conventions exist — <strong>centred</strong> on the 2×2 block (JPEG, x264, ffmpeg's
-default) and <strong>co-sited</strong> with the top-left luma pixel ("left", from MPEG‑2). The gap
-is exactly 0.5 luma pixels and lives entirely in the interpretation; the sample values are
-identical.</p>
+<em>where</em> the surviving chroma samples sit relative to luma, which the format does not fix. Two
+conventions exist — <strong>centred</strong> on the 2×2 block (JPEG, x264, ffmpeg's default) and
+<strong>co-sited</strong> with the top-left luma pixel ("left", from MPEG‑2). The gap is exactly
+0.5 luma pixels and lives entirely in the interpretation; the sample values are identical.</p>
 
 <table>
 <thead><tr><th>Measurement</th><th class="num">Centred (correct)</th><th class="num">Co-sited (wrong)</th><th class="num">Cost</th></tr></thead>
@@ -272,30 +261,35 @@ identical.</p>
 </tbody>
 </table>
 
-<p>The first two rows and the third contradict each other on purpose, and the contradiction is the
-finding. On the photograph the wrong decode costs <strong>0.017 dB</strong> — five hundred times
-less than the 9.7 dB of Experiment 1, far below any automated gate. On a controlled edge whose
-position is known (a 1px ramp at x = 128.0, subsampled with the 2×2 box, which <em>is</em> centred
-siting by construction) the same error costs <strong>3.0 dB</strong> and lands half a pixel left.
-Whole-frame PSNR averages the defect over the 53% of the frame that is chroma-flat and dilutes it
-into nothing.</p>
+<p>Rows one and three contradict each other on purpose, and that is the finding. On the photograph
+the wrong decode costs <strong>0.017 dB</strong> — five hundred times less than Experiment 1's 9.7 dB,
+far below any automated gate. On a controlled edge of known position (a 1px ramp at x = 128.0,
+subsampled with the 2×2 box, which <em>is</em> centred siting by construction) the same error costs
+<strong>3.0 dB</strong> and lands half a pixel left. Whole-frame PSNR averages the defect over the 53%
+of the frame that is chroma-flat and dilutes it into nothing.</p>
+
+<p>Bucketing the difference by local chroma gradient shows where it lands: the steepest 0.83% of
+pixels carry mean |ΔCb| 5.97, the 1.86% band above gradient 1 carries 1.13, and the 44.15% just above
+zero carries 0.21. One result defied my prediction — I expected the exactly-flat 53.14% to be
+untouched, and it is not: mean 0.0992, p99 0.877. The wrong decode does not fail to shift a flat
+pixel, it samples a different neighbour, so error bleeds one pixel onto the flat side of every
+boundary. Frame-wide the error is 2.63% of chroma RMS; 1.29% of pixels exceed |ΔCb| = 2.</p>
 
 <p>Regressing the difference between the two reconstructions against the horizontal gradient of the
 correct one gives r = <strong>0.776</strong>: to first order the error is a pure 0.25-chroma-pixel
-shift. That is why it behaves geometrically, not photometrically — it doubles with every doubling of
-output size, from half a pixel natively to a two-pixel fringe at 4×, where it looks exactly like bad
-chroma upsampling and gets "fixed" with sharpening that cannot work, because the edge is displaced,
-not soft.</p>
+shift. So it behaves geometrically, not photometrically — doubling with every doubling of output size,
+from half a pixel natively to a two-pixel fringe at 4×, where it looks like bad chroma upsampling and
+gets "fixed" with sharpening that cannot work, because the edge is displaced, not soft.</p>
 
 <p>Two things I expected to work, and measured that they do not. <strong>Channel-difference metering
 is blind to it:</strong> phase-correlating R against B on a 2× upscale gives <code>dy=0, dx=0</code>
-under both hypotheses, because a siting error moves Cb and Cr <em>together</em> whereas aberration
-moves them apart. <strong>The metadata flag does not protect you:</strong> encoding one frame with
+under both hypotheses, because a siting error moves Cb and Cr <em>together</em> where aberration
+moves them apart. <strong>The metadata flag does not protect you:</strong>
 <code>-chroma_sample_location left|center|topleft</code> gives three VUI values and <em>one identical
-md5</em> after decoding to raw YUV — and again as rgb24. The flag propagates through stream copy, mkv
-remux and a rescale re-encode; no decoder tested applies it. The 1-byte size difference is the VUI
-bit pattern, not picture data. (Scope: libx264, one frame, ffmpeg 6.1.1's own swscale — a hardware
-decoder that honours the VUI could differ.)</p>
+md5</em> after decoding to raw YUV, and again as rgb24. The flag propagates through stream copy, mkv
+remux and a rescale re-encode; no decoder tested applies it — the 1-byte size difference is the VUI
+bit pattern, not picture data. Scope: libx264, one frame, ffmpeg 6.1.1's swscale; a hardware decoder
+that honours the VUI could differ.</p>
 
 <pre><code># luma pixel i spans [i, i+1); chroma sample j sits at luma coord 2j + c
 #   c = 1.0 -> centred (x264/JPEG)      c = 0.5 -> left (MPEG-2)
@@ -331,12 +325,12 @@ upscale versus 0.41 dB before it. Keep intermediates at 4:4:4.</li>
 <li><strong>Reconstruct chroma with bilinear, not lanczos.</strong> 0.45 dB better here, and free.
 Sharpening a band-limited channel amplifies decimation ringing.</li>
 <li><strong>Audit one-pixel features before blaming the upscaler.</strong> A 1px coloured stroke
-loses exactly 50% of its contrast from subsampling alone. If thin strokes look washed out, the
-damage predates your upscale and no amount of sharpening will restore it — that is the same
-mechanism as the ink-loss measurements on thin line art.</li>
-<li><strong>Do not scale a 4:2:0 source aggressively.</strong> The chroma penalty is largest at
-small scale factors (−9.7 dB at k=2) and shrinks at k=4 (−5.7 dB) only because the upscaler's own
-error grows to hide it. The absolute chroma error still climbs, from 0.51 RMS to 1.49.</li>
+loses exactly 50% of its contrast to subsampling alone, so washed-out thin strokes predate the
+upscale and no sharpening restores them — the mechanism behind the ink-loss measurements on line
+art.</li>
+<li><strong>Do not scale a 4:2:0 source aggressively.</strong> The penalty is largest at small
+factors (−9.7 dB at k=2) and shrinks at k=4 (−5.7 dB) only because the upscaler's own error hides
+it. Absolute chroma error still climbs, 0.51 → 1.49 RMS.</li>
 <li><strong>Use centred chroma siting when you resample yourself.</strong> It is what the encoder
 assumed when it applied the 2×2 box. A co-sited assumption is 0.5 luma px off, costs 3.0 dB on an
 edge, and becomes a colour fringe at 2× and 4×. Do not expect <code>chroma_location</code> to save
