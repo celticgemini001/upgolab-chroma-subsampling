@@ -446,6 +446,14 @@ photograph. Past gain 2 it stops being a correction — edge undershoot grows fr
 step of 122.8, and hard-edge PSNR is already falling.</li>
 <li><strong>Test your own content.</strong> All of the above is a two-minute script; the numbers
 that matter are the ones on your footage, not the ones on this page.</li>
+<li><strong>Separate chroma noise from luma noise when you denoise.</strong> A pixel-level 4:2:0
+square shows they behave nothing alike. Chroma noise arrives already attenuated to
+<strong>0.31×</strong> by the box, but the same box on an upscaled field returns 0.957 and
+removes 4.3% instead of 50% — because interpolation has already correlated the samples it averages.
+And at σ 1.0 the blur radius that gains chroma 1.12 dB costs luma 6.34 dB, so one global "denoise"
+strength cannot be right for both planes. Measured here:
+<a href="https://celticgemini001.github.io/upgolab-noise-and-grain-upscaling/#chroma-420">noise and
+grain under upscaling — the 4:2:0 chroma path</a>.</li>
 </ol>
 
 <p>If you want to see what a whole frame looks like after these steps rather than a PSNR number,
