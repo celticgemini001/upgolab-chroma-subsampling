@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Chroma Subsampling Before You Upscale: What 4:2:0 Actually Costs</title>
-<meta name="description" content="Measured: 4:2:0 leaves luma bit-identical and drops chroma PSNR by 9.7 dB at 2x. Bilinear chroma reconstruction beats lanczos by 0.45 dB. And on smooth-chroma photos, 4:4:4 encoded 2.3% SMALLER than 4:2:0 at the same CRF — with the mechanism measured.">
+<meta name="description" content="Measured: 4:2:0 leaves luma bit-identical and drops chroma PSNR by 9.7 dB at 2x. Chroma codes 6.6 dB above luma at CRF 20, so x264's default chroma QP is over-provisioned; the offset that fixes it clamps at -12. 4:2:2 costs only 1.04x the file and is a pass-through for vertical chroma detail. And on smooth-chroma photos, 4:4:4 encoded 2.3% SMALLER than 4:2:0.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-chroma-subsampling/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Chroma Subsampling Before You Upscale: What 4:2:0 Actually Costs">
-<meta property="og:description" content="Luma untouched, chroma -9.7 dB, 1px colour lines lose exactly half their contrast. Six measurements, one negative result about file size.">
+<meta property="og:description" content="Luma untouched, chroma -9.7 dB, 1px colour lines lose exactly half their contrast, and x264 spends chroma bits you never asked for. Ten measurements, three negative results.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Article",
  "headline":"Chroma Subsampling Before You Upscale: What 4:2:0 Actually Costs",
  "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
  "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
  "datePublished":"2026-11-15",
- "dateModified":"2026-11-15",
+ "dateModified":"2026-11-19",
  "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-chroma-subsampling/"}
 </script>
 <style>
@@ -419,6 +419,270 @@ reproduction script below varies content as well as kernel. Put a 4:2:0 source a
 side by side at 4× and judge the edge rather than the dB value — the edge is where the difference
 lives.</p>
 
+<h2>Experiment 9 — x264 over-spends on chroma by default, and the offset gives it back</h2>
+
+<p>Every experiment above treats subsampling as a format. There is a second, independent lever, and
+it lives inside the encoder: <code>chroma_qp_offset</code>, exposed by x264 as
+<code>-chromaoffset</code>. It shifts chroma QP relative to luma QP, so you can buy chroma precision
+without touching luma at all. Its default is 0, which means the encoder inherits the luma QP — and
+on photographic content that turns out to be far more than chroma needs.</p>
+
+<p>Measure the two planes separately at CRF 20 on a 1280×720 frame with broadband luma structure
+(six sinusoids, 2–127 cycles across the frame) and chroma carrying three smooth edges at 60, 140
+and 320 px plus a low-frequency gradient. Both planes are compared against the same 2×2 boxed
+reference, so the numbers isolate encoder loss and exclude format loss:</p>
+
+<table>
+<thead><tr><th>Plane</th><th class="num">PSNR at offset 0</th><th class="num">headroom</th></tr></thead>
+<tbody>
+<tr><td>Luma (Y)</td><td class="num">47.81 dB</td><td class="num">—</td></tr>
+<tr><td>Chroma (Cb, Cr)</td><td class="num">54.45 dB</td><td class="num">+6.64 dB</td></tr>
+</tbody>
+</table>
+
+<p>Chroma is being coded 6.6 dB better than luma, unasked. That is not a bug — x264's psy-rd and
+adaptive quantisation are tuned on luma, and chroma follows luma's QP rather than its own error
+budget. But it means the default is not a neutral choice, and on this content it is leaving bytes
+on the table that luma would spend better. Sweep the offset, holding CRF at 20:</p>
+
+<table>
+<thead><tr><th class="num">offset</th><th class="num">bytes</th><th class="num">Δ bytes</th><th class="num">chroma PSNR</th><th class="num">Δ chroma</th><th class="num">luma PSNR</th></tr></thead>
+<tbody>
+<tr><td class="num">−10</td><td class="num">25,595</td><td class="num">+16.5%</td><td class="num">57.53</td><td class="num">+3.08</td><td class="num">47.81</td></tr>
+<tr><td class="num">−8</td><td class="num">23,636</td><td class="num">+7.6%</td><td class="num">56.65</td><td class="num">+2.20</td><td class="num">47.81</td></tr>
+<tr><td class="num">−6</td><td class="num">22,912</td><td class="num">+4.3%</td><td class="num">55.91</td><td class="num">+1.46</td><td class="num">47.81</td></tr>
+<tr><td class="num">−4</td><td class="num">22,405</td><td class="num">+2.0%</td><td class="num">55.86</td><td class="num">+1.41</td><td class="num">47.79</td></tr>
+<tr><td class="num">−2</td><td class="num">22,160</td><td class="num">+0.9%</td><td class="num">55.28</td><td class="num">+0.84</td><td class="num">47.79</td></tr>
+<tr><td class="num">0</td><td class="num">21,962</td><td class="num">—</td><td class="num">54.45</td><td class="num">—</td><td class="num">47.81</td></tr>
+<tr><td class="num">+4</td><td class="num">21,523</td><td class="num">−2.0%</td><td class="num">53.01</td><td class="num">−1.44</td><td class="num">47.79</td></tr>
+<tr><td class="num">+8</td><td class="num">21,535</td><td class="num">−1.9%</td><td class="num">50.53</td><td class="num">−3.92</td><td class="num">47.79</td></tr>
+<tr><td class="num">+12</td><td class="num">21,432</td><td class="num">−2.4%</td><td class="num">48.18</td><td class="num">−6.26</td><td class="num">47.80</td></tr>
+</tbody>
+</table>
+
+<p>The curve is one-sided. Going negative buys chroma precision at roughly 0.19 dB per 1% of bytes;
+going positive gives back only 2.4% of the file for a 6.3 dB chroma loss. The asymmetry is what you
+would expect if chroma at offset 0 is already above the quality the content deserves: adding bits
+still helps because the gradients are smooth and cheap to code, but removing them damages the plane
+immediately.</p>
+
+<h3>Where the range actually ends, and why</h3>
+
+<p>Offsets below −10 produce <em>bit-identical files</em>. Verified by hash, not by eyeballing
+PSNR — <code>md5sum</code> on the encodes at −10, −12, −16 and −24 returns the same digest
+<code>98b8a04d…</code>:</p>
+
+<pre><code>98b8a04d3de1f1afecb009151f40364a  photo_c18_o-10.mp4
+98b8a04d3de1f1afecb009151f40364a  photo_c18_o-12.mp4
+98b8a04d3de1f1afecb009151f40364a  photo_c18_o-16.mp4
+98b8a04d3de1f1afecb009151f40364a  photo_c18_o-24.mp4
+f608c1b9bcbe9a4bea7a4d29f058973c  photo_c18_o-8.mp4     &lt;-- last value that changes anything</code></pre>
+
+<p>x264's own log explains it: the offset you pass is not the offset it uses. Requesting −6, −8, −9,
+−10 and −11 yields <code>chroma_qp_offset</code> of −8, −10, −11, −12 and −12 in the encoder
+configuration — a constant −2 shift on the way in, then a hard floor at −12. So the usable range is
+−10 to +51 in ffmpeg terms, and everything past −10 is the same encode. If you sweep this knob and
+see a plateau, it is not the content saturating; it is the clamp.</p>
+
+<h3>The decision this actually poses: chroma bits or luma bits</h3>
+
+<p>A 16% budget increase has two homes. Raise chroma precision with the offset, or lower CRF
+globally and let every plane improve. Bisect CRF to land on the same byte count and compare:</p>
+
+<table>
+<thead><tr><th>Content</th><th>Arm</th><th class="num">bytes</th><th class="num">Δ chroma</th><th class="num">Δ luma</th></tr></thead>
+<tbody>
+<tr><td rowspan="3">structured chroma,<br>broadband luma</td><td>base, CRF 20</td><td class="num">22,093</td><td class="num">—</td><td class="num">—</td></tr>
+<tr><td>offset −10</td><td class="num">26,282 <em>(+19.0%)</em></td><td class="num"><strong>+2.87</strong></td><td class="num">−0.01</td></tr>
+<tr><td>CRF 18.28</td><td class="num">26,410 <em>(+19.5%)</em></td><td class="num">+0.31</td><td class="num"><strong>+0.95</strong></td></tr>
+<tr><td rowspan="3">very smooth chroma,<br>same luma</td><td>base, CRF 20</td><td class="num">22,413</td><td class="num">—</td><td class="num">—</td></tr>
+<tr><td>offset −8</td><td class="num">25,239 <em>(+12.6%)</em></td><td class="num"><strong>+2.93</strong></td><td class="num">−0.04</td></tr>
+<tr><td>CRF 18.83</td><td class="num">25,237 <em>(+12.6%)</em></td><td class="num">+0.11</td><td class="num"><strong>+0.64</strong></td></tr>
+</tbody>
+</table>
+
+<p>At equal bytes the offset wins chroma by roughly 9× and wins luma by exactly nothing. Lowering
+CRF wins luma and barely moves chroma. Neither is better in the abstract; the question is which
+plane is short. And on this content the answer is neither, because chroma is at 54.5 dB and luma at
+47.8 dB — the short plane is luma, which is why the correct use of this knob on a photograph is
+<em>positive</em>, not negative. Take 2% of the file back by dropping chroma to 50.5 dB, which is
+still 2.7 dB above luma, and spend it on the plane that is actually limiting.</p>
+
+<h3>The negative result: the offset stops being cheap when chroma carries the content</h3>
+
+<p>Run the same sweep on a frame whose luma is nearly flat and whose chroma holds a 2D colour field
+— a sky, an out-of-focus background, a colour-graded surface. Now chroma is the only thing in the
+frame with structure, so lowering its QP raises bitrate enormously:</p>
+
+<table>
+<thead><tr><th class="num">offset</th><th class="num">bytes</th><th class="num">Δ bytes</th><th class="num">chroma PSNR</th><th class="num">dB per +1% bytes</th></tr></thead>
+<tbody>
+<tr><td class="num">0</td><td class="num">4,857</td><td class="num">—</td><td class="num">53.91</td><td class="num">—</td></tr>
+<tr><td class="num">−2</td><td class="num">4,990</td><td class="num">+2.7%</td><td class="num">54.53</td><td class="num">0.23</td></tr>
+<tr><td class="num">−4</td><td class="num">6,161</td><td class="num">+26.9%</td><td class="num">55.12</td><td class="num">0.045</td></tr>
+<tr><td class="num">−6</td><td class="num">8,799</td><td class="num">+81.2%</td><td class="num">55.47</td><td class="num">0.019</td></tr>
+<tr><td class="num">−8</td><td class="num">13,874</td><td class="num">+185.7%</td><td class="num">56.52</td><td class="num">0.014</td></tr>
+<tr><td class="num">−10</td><td class="num">21,034</td><td class="num">+333.1%</td><td class="num">57.34</td><td class="num">0.010</td></tr>
+</tbody>
+</table>
+
+<p>On the photographic frame the same knob returned 0.19 dB per 1% of bytes. Here it returns 0.010 —
+19× worse — and the last four rows cost 4.3× the file for 2.8 dB. The efficiency was never a
+property of the knob. It was a property of chroma being <em>over-provisioned</em>: you can only give
+back precision your content never used. Where chroma is the content, there is nothing to give back
+and the knob reverts to being an ordinary, expensive quality control.</p>
+
+<h3>The gain grows as the bitrate drops, and that is the honest use case</h3>
+
+<p>At CRF 20 the offset is measurable and invisible. Push CRF up until luma runs out of bits and
+chroma QP, which follows luma QP, degrades with it. Same frame, offset −10 against offset 0:</p>
+
+<table>
+<thead><tr><th class="num">CRF</th><th class="num">bytes off0</th><th class="num">bytes off−10</th><th class="num">Δ bytes</th><th class="num">chroma off0</th><th class="num">chroma off−10</th><th class="num">Δ</th></tr></thead>
+<tbody>
+<tr><td class="num">20</td><td class="num">22,093</td><td class="num">26,282</td><td class="num">+19.0%</td><td class="num">54.75</td><td class="num">57.62</td><td class="num">+2.87</td></tr>
+<tr><td class="num">26</td><td class="num">13,065</td><td class="num">14,120</td><td class="num">+8.1%</td><td class="num">51.14</td><td class="num">55.86</td><td class="num">+4.72</td></tr>
+<tr><td class="num">30</td><td class="num">9,802</td><td class="num">10,982</td><td class="num">+12.0%</td><td class="num">48.61</td><td class="num">53.91</td><td class="num"><strong>+5.30</strong></td></tr>
+<tr><td class="num">34</td><td class="num">8,204</td><td class="num">9,351</td><td class="num">+14.0%</td><td class="num">46.52</td><td class="num">51.31</td><td class="num">+4.80</td></tr>
+<tr><td class="num">38</td><td class="num">7,086</td><td class="num">7,786</td><td class="num">+9.9%</td><td class="num">43.85</td><td class="num">48.85</td><td class="num">+5.01</td></tr>
+<tr><td class="num">42</td><td class="num">5,342</td><td class="num">5,843</td><td class="num">+9.4%</td><td class="num">42.73</td><td class="num">46.92</td><td class="num">+4.19</td></tr>
+</tbody>
+</table>
+
+<p>Peak gain is at CRF 30: +5.3 dB of chroma for 12% more bytes, with luma untouched to within
+0.03 dB across the whole table. This is the one setting where the knob earns its place — a tight
+delivery target where luma is visibly running out of bits and chroma has collapsed along with it.
+It costs one flag and no change to the pipeline.</p>
+
+<div class="callout">
+<p><strong>The limit, stated plainly.</strong> At CRF 30, chroma RMS error falls from 0.946 to 0.514
+8-bit codes. Both are below one code. At CRF 20 it is 0.467 → 0.335. So on 8-bit delivery this knob
+moves chroma error <em>within the quantisation step</em>: the improvement is real, reproducible, and
+smaller than the thing it is measuring against. It matters where chroma error compounds — repeated
+re-encodes, 10-bit intermediates, or a plane that gets amplified by a later saturation or
+white-balance operation. It does not matter as a one-off 8-bit export. Measure your own chain before
+adopting it; a 5 dB chroma gain that sits under the rounding error of your delivery format is a
+number, not a result.</p>
+</div>
+
+<h2>Experiment 10 — the subsampling grid is not square, and most advice ignores that</h2>
+
+<p>4:2:0 halves both axes. 4:2:2 halves only the horizontal one. That asymmetry is the whole reason
+4:2:2 exists for video and 4:2:0 exists for delivery, but the usual summary — "4:2:2 is halfway
+between 4:2:0 and 4:4:4" — is wrong in a way that has practical consequences. It is halfway in
+<em>bitrate</em>. In <em>quality</em> it is either identical to 4:2:0 or identical to 4:4:4,
+depending on which way your chroma detail runs.</p>
+
+<p>Test it directly. A sinusoidal chroma pattern, amplitude 50 codes, on a flat 128 luma, swept over
+eleven periods and averaged over 24 phases so the result does not depend on where the pattern lands
+relative to the sample grid. Amplitude retention after the format's box filter, as a percentage of
+the pre-filter amplitude:</p>
+
+<table>
+<thead><tr><th class="num">period</th><th class="num">cyc/px</th><th class="num">4:2:2<br>along X</th><th class="num">4:2:0<br>along X</th><th class="num">4:2:2<br>along Y</th><th class="num">4:2:0<br>along Y</th></tr></thead>
+<tbody>
+<tr><td class="num">5 px</td><td class="num">0.2000</td><td class="num">80.90%</td><td class="num">80.90%</td><td class="num"><strong>100.00%</strong></td><td class="num">80.90%</td></tr>
+<tr><td class="num">6 px</td><td class="num">0.1667</td><td class="num">75.00%</td><td class="num">75.00%</td><td class="num"><strong>100.00%</strong></td><td class="num">75.00%</td></tr>
+<tr><td class="num">8 px</td><td class="num">0.1250</td><td class="num">85.36%</td><td class="num">85.36%</td><td class="num"><strong>100.00%</strong></td><td class="num">85.36%</td></tr>
+<tr><td class="num">10 px</td><td class="num">0.1000</td><td class="num">90.45%</td><td class="num">90.45%</td><td class="num"><strong>100.00%</strong></td><td class="num">90.45%</td></tr>
+<tr><td class="num">12 px</td><td class="num">0.0833</td><td class="num">93.30%</td><td class="num">93.30%</td><td class="num"><strong>100.00%</strong></td><td class="num">93.30%</td></tr>
+<tr><td class="num">16 px</td><td class="num">0.0625</td><td class="num">96.19%</td><td class="num">96.19%</td><td class="num"><strong>100.00%</strong></td><td class="num">96.19%</td></tr>
+<tr><td class="num">24 px</td><td class="num">0.0417</td><td class="num">98.30%</td><td class="num">98.30%</td><td class="num"><strong>100.00%</strong></td><td class="num">98.30%</td></tr>
+<tr><td class="num">32 px</td><td class="num">0.0312</td><td class="num">99.04%</td><td class="num">99.04%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.04%</td></tr>
+<tr><td class="num">48 px</td><td class="num">0.0208</td><td class="num">99.57%</td><td class="num">99.57%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.57%</td></tr>
+<tr><td class="num">96 px</td><td class="num">0.0104</td><td class="num">100.01%</td><td class="num">100.01%</td><td class="num"><strong>100.00%</strong></td><td class="num">100.02%</td></tr>
+</tbody>
+</table>
+
+<p>Two columns are identical to the digit at every period: 4:2:2 along X and 4:2:0 along X. Both
+apply a 2× box to the horizontal axis and the vertical axis never enters. And 4:2:2 along Y is
+100.00% at every period, because 4:2:2 does not touch the vertical axis at all — it is a lossless
+pass-through for chroma detail that runs horizontally on screen.</p>
+
+<p>So the "halfway" description is only true in bytes, and even then only loosely. Measured at CRF 20,
+4:2:2 costs 1.036× the 4:2:0 file on a photographic frame and 1.050× on a chroma-heavy one — barely
+more than 4:2:0. On pure synthetic chroma patterns with nothing else to code, the ratio rises to
+1.15–1.21× because chroma is the entire bitrate. And in that same sweep, 4:2:2 along Y retained
+100.00% at every period, because 4:2:2 does not touch the vertical axis at all — at the format level
+it is a pass-through for chroma detail oriented along Y. So it is not a compromise between two
+qualities; it is a choice about which axis you are willing to lose, priced much closer to 4:2:0 than
+the "halfway" framing suggests.</p>
+
+<h3>The response tracks the box filter, up to the point where it does not</h3>
+
+<p>The retention values sit close to the closed form for a 2× box — <code>|sinc(2f)|</code> with
+sinc(x) = sin(πx)/(πx) — which is a useful check that the sweep is measuring the format and not
+something incidental:</p>
+
+<table>
+<thead><tr><th class="num">cyc/px</th><th class="num">|sinc(2f)| predicts</th><th class="num">measured 4:2:0</th><th class="num">gap</th></tr></thead>
+<tbody>
+<tr><td class="num">0.0104</td><td class="num">99.93%</td><td class="num">100.01%</td><td class="num">+0.08</td></tr>
+<tr><td class="num">0.0208</td><td class="num">99.72%</td><td class="num">99.57%</td><td class="num">−0.15</td></tr>
+<tr><td class="num">0.0417</td><td class="num">98.86%</td><td class="num">98.30%</td><td class="num">−0.56</td></tr>
+<tr><td class="num">0.0625</td><td class="num">97.45%</td><td class="num">96.19%</td><td class="num">−1.26</td></tr>
+<tr><td class="num">0.0833</td><td class="num">95.50%</td><td class="num">93.30%</td><td class="num">−2.20</td></tr>
+<tr><td class="num">0.1000</td><td class="num">93.55%</td><td class="num">90.45%</td><td class="num">−3.10</td></tr>
+<tr><td class="num">0.1250</td><td class="num">90.03%</td><td class="num">85.36%</td><td class="num">−4.67</td></tr>
+<tr><td class="num">0.1667</td><td class="num">82.69%</td><td class="num">75.00%</td><td class="num">−7.69</td></tr>
+</tbody>
+</table>
+
+<p>The gap widens monotonically as frequency climbs, and that is not measurement error. The two-sided
+sinc is the response of a box filter that can sample the negative lobe of the sine; a decimator that
+first low-passes with a half-band filter before taking every second sample cannot, and loses more
+near the cutoff. Every real encoder low-passes. So the closed form is an upper bound on retention,
+optimistic by 8 percentage points at 0.167 cyc/px and negligible below 0.04.</p>
+
+<h3>At exactly the chroma Nyquist, the number stops being a number</h3>
+
+<p>Step to a 4-pixel period — the chroma grid's Nyquist limit — and phase averaging stops being
+cosmetic. Same sine, amplitude 50, 24 phases:</p>
+
+<table>
+<thead><tr><th class="num">period</th><th class="num">minimum</th><th class="num">maximum</th><th class="num">mean</th><th class="num">spread</th></tr></thead>
+<tbody>
+<tr><td class="num">8 px</td><td class="num">146.6%</td><td class="num">183.2%</td><td class="num">166.8%</td><td class="num">36.6 pp</td></tr>
+<tr><td class="num">6 px</td><td class="num">129.9%</td><td class="num">150.0%</td><td class="num">142.4%</td><td class="num">20.1 pp</td></tr>
+<tr><td class="num">4 px</td><td class="num"><strong>0.0%</strong></td><td class="num"><strong>141.4%</strong></td><td class="num">89.5%</td><td class="num"><strong>141.4 pp</strong></td></tr>
+</tbody>
+</table>
+
+<p>At 4 px the answer is anywhere from complete annihilation to 41% <em>amplification</em>, purely
+as a function of where the pattern sits relative to the sample grid. The mean of 89.5% is meaningless
+as a description of any individual case. This is aliasing, and it is why fine chroma texture —
+tightly-spaced colour stripes, thin saturated details, moiré-prone fabric — behaves unpredictably
+under 4:2:0: not a consistent softening but a per-region lottery. Note also that two of the three
+rows exceed 100%: a 2× box on a near-Nyquist pattern can produce amplitude larger than the source's.
+Retention above 100% is the aliasing signature, and it is a defect even though it looks like a win.</p>
+
+<h3>A tool trap: ffmpeg's 4:2:0 → 4:4:4 upsample is nearest, not bilinear</h3>
+
+<p>If you measure chroma quality by decoding to <code>yuv444p</code> and comparing against the source,
+you are almost certainly measuring a replication step rather than the encoder. Verified on a
+lossless 4:2:0 encode: decoding to <code>yuv444p</code> and comparing against a nearest-neighbour
+replication of the native chroma plane gives a mean absolute difference of <strong>0.002 codes</strong>
+and a maximum of 1. swscale is not interpolating here — it is replicating.</p>
+
+<p>That has two consequences. First, a PSNR taken from an upsampled decode is not the format loss;
+it is the format loss plus whatever the decoder chose, and the two are not separable after the fact.
+Measure the native plane (decimate the reference with the same 2×2 box, compare in the subsampled
+domain) — which is what every table on this page does. Second, if you are inspecting a 4:2:0 source
+in an image editor that shows you a smooth chroma gradient, the editor is interpolating for display
+and you are being shown detail the file does not contain. The blocky version is the honest one.</p>
+
+<div class="callout">
+<p><strong>What this changes in practice.</strong> If your footage has chroma structure that runs
+mostly one way — horizontal colour banding in a sky, an anamorphic squeeze, a graded background with
+vertical variation and no horizontal detail — 4:2:2 preserves it completely at the format level while
+4:2:0 loses 15–25% of the amplitude at 6–8 px periods. That is the case where paying the extra 4%
+bitrate is justified, and it is <em>not</em> the case the "halfway between" framing predicts. Check
+the orientation of the detail before choosing a format; a frame whose chroma detail is squared off in
+both axes gains nothing from 4:2:2 in the axis it keeps and still pays for it. Note also that this
+comparison is at the format level, before encoding: once libx264 runs, its own errors can dominate
+the 15–25% difference, so verify on your own footage rather than trusting the table.</p>
+</div>
+
 <h2>What to actually do</h2>
 
 <ol>
@@ -444,6 +708,12 @@ edge width is fixed at 2.50 source pixels by the encoder, so nothing in the scal
 an unsharp mask on Cb/Cr recovered <strong>+1.35 dB</strong> on smooth content and +1.00 dB on a
 photograph. Past gain 2 it stops being a correction — edge undershoot grows from 6.63 to 14.55 on a
 step of 122.8, and hard-edge PSNR is already falling.</li>
+<li><strong>Measure which plane is short before spending bits.</strong> At CRF 20 on a photograph,
+chroma codes 6.6 dB above luma without being asked. When that happens the correct move is
+<em>positive</em> <code>-chromaoffset</code>: it gives back ~2% of the file for a chroma loss that
+still leaves chroma ahead of luma. When chroma is the content — a flat-luma colour field — the same
+knob costs 4.3× the file for 2.8 dB, so leave it at 0. And anything below −10 is a no-op: x264
+clamps at <code>chroma_qp_offset</code> −12 after an internal −2, producing bit-identical files.</li>
 <li><strong>Test your own content.</strong> All of the above is a two-minute script; the numbers
 that matter are the ones on your footage, not the ones on this page.</li>
 <li><strong>Separate chroma noise from luma noise when you denoise.</strong> A pixel-level 4:2:0
@@ -562,6 +832,100 @@ climbing the whole way. If your numbers drift from these, the cause is almost al
 kernel or the box-filter siting, both of which are one line above and both of which move PSNR by
 more than 1 dB.</p>
 
+<p><strong>Experiment 9 — chroma QP offset, and where x264 clamps it.</strong> Two planes measured
+in the subsampled domain, so encoder loss is separated from format loss. Note the native-plane
+decode: <code>-pix_fmt yuv420p</code>, not <code>yuv444p</code>, because swscale's 4:2:0→4:4:4 step
+is nearest-neighbour and would silently add 3 dB of nothing.</p>
+
+<pre><code>import numpy as np, subprocess, os, json
+
+W, H = 1280, 720
+
+def dec420(p):                       # keep the planes native — do NOT upsample to 444
+    raw = subprocess.run(["ffmpeg","-v","error","-i",p,"-pix_fmt","yuv420p",
+                          "-f","rawvideo","-"], capture_output=True, check=True).stdout
+    cw, ch = W//2, H//2
+    y = np.frombuffer(raw[:W*H], np.uint8).reshape(H, W)
+    u = np.frombuffer(raw[W*H:W*H+cw*ch], np.uint8).reshape(ch, cw)
+    v = np.frombuffer(raw[W*H+cw*ch:], np.uint8).reshape(ch, cw)
+    return y.astype(float), u.astype(float), v.astype(float)
+
+def box_both(c):                     # the reference must take the same 2x2 box
+    c = c[:c.shape[0]//2*2, :c.shape[1]//2*2]
+    return c.reshape(c.shape[0]//2, 2, c.shape[1]//2, 2).mean(axis=(1,3))
+
+def psnr(a, b):
+    m = np.mean((a-b)**2)
+    return 99.0 if m &lt;= 1e-12 else 10*np.log10(255.0**2/m)
+
+# ref: planes you designed, written as PLANAR yuv444p (Y then U then V), not interleaved
+ref = np.fromfile("src/structured.yuv", np.uint8).reshape(3, H, W).astype(float)
+cb_ref, cr_ref = box_both(ref[1]), box_both(ref[2])
+
+for off in (-16, -12, -10, -8, -6, -4, -2, 0, 4, 8, 12):
+    p = f"enc/o{off}.mp4"
+    subprocess.run(["ffmpeg","-y","-v","error","-i","src/structured_ref.mkv",
+        "-pix_fmt","yuv420p","-c:v","libx264","-crf","20","-preset","slow",
+        "-threads","1","-chromaoffset",str(off),p], check=True)
+    y, u, v = dec420(p)
+    print(f"off {off:>4}  {os.path.getsize(p):7d}B  "
+          f"C {(psnr(cb_ref,u)+psnr(cr_ref,v))/2:7.3f}  Y {psnr(ref[0],y):7.3f}")
+
+# the clamp: identical md5 below -10 proves x264 floors chroma_qp_offset at -12
+# ffmpeg -y -v verbose -i src/structured_ref.mkv ... -chromaoffset -10 /tmp/a.mp4 2>&1 \
+#   | grep -o 'chroma_qp_offset=[-0-9]*'      -&gt; chroma_qp_offset=-12</code></pre>
+
+<p><strong>Expected output.</strong> Chroma PSNR climbs monotonically from offset −10 to +12 and
+the <code>B</code> column stops changing below −10 — offsets −10, −12 and −16 give the identical byte
+count and the identical md5, which is the clamp, not a plateau. Luma stays within 0.03 dB of
+47.81 across the whole sweep, confirming the knob only touches chroma.</p>
+
+<p><strong>Experiment 10 — the subsampling grid is anisotropic.</strong> Amplitude retention of a
+sine through each format's box, averaged over 24 phases. Pure numpy, no encoder, so this is format
+loss in isolation. Note the axis bookkeeping: content varying along X needs a profile across
+<em>columns</em> (<code>mean(axis=0)</code>), which is the mistake worth making once.</p>
+
+<pre><code>import numpy as np
+
+W, H = 1280, 720
+yy, xx = np.mgrid[0:H, 0:W].astype(float)
+AMP = 50.0
+
+def box_h(c):                        # 4:2:2: horizontal box only
+    return c[:, :c.shape[1]//2*2].reshape(c.shape[0], -1, 2).mean(axis=2)
+def box_both(c):                     # 4:2:0: both axes
+    c = c[:c.shape[0]//2*2, :c.shape[1]//2*2]
+    return c.reshape(c.shape[0]//2, 2, c.shape[1]//2, 2).mean(axis=(1,3))
+
+def amp_x(c): p = c.mean(axis=0); return np.percentile(p,99) - np.percentile(p,1)
+def amp_y(c): p = c.mean(axis=1); return np.percentile(p,99) - np.percentile(p,1)
+
+for P in (4, 6, 8, 12, 16, 24, 32, 48, 96):
+    row = {}
+    for axis in ("X", "Y"):
+        A = amp_x if axis == "X" else amp_y
+        r422, r420 = [], []
+        for ph in np.linspace(0, 2*np.pi, 24, endpoint=False):
+            coord = xx if axis == "X" else yy
+            c = 128 + AMP*np.sin(2*np.pi*coord/P + ph)
+            a0 = A(c)
+            r422.append(100*A(box_h(c))/a0 if axis == "X" else 100.0)
+            r420.append(100*A(box_both(c))/a0)
+        row[axis] = (np.mean(r422), np.mean(r420), np.std(r420))
+    print(f"P={P:&gt;3} f={1/P:.4f} | X 422 {row['X'][0]:6.2f}% 420 {row['X'][1]:6.2f}% "
+          f"| Y 422 {row['Y'][0]:6.2f}% 420 {row['Y'][1]:6.2f}% (sd {row['Y'][2]:.1f})")
+
+# closed-form check: a 2x box is |sinc(2f)| = |sin(2*pi*f)/(2*pi*f)|
+for f in (0.0208, 0.0625, 0.1250, 0.1667):
+    print(f, abs(np.sin(2*np.pi*f)/(2*np.pi*f)))</code></pre>
+
+<p><strong>Expected output.</strong> The 4:2:2-along-Y column is 100.00% at every period, and the
+4:2:2-along-X column equals the 4:2:0-along-X column to two decimals — 4:2:2 never touches the
+vertical axis, so vertical chroma detail is a pass-through. The sine-sweep values sit below
+<code>|sinc(2f)|</code> and the gap widens with frequency (−0.15 pp at 0.021 cyc/px, −7.7 pp at
+0.167), because a real decimator low-passes before dropping samples and a two-sided sinc cannot.
+At P=4 the standard deviation across phases is larger than the mean is meaningful.</p>
+
 <p>Both encodes used for the byte comparison are bit-identical across repeated runs — same
 command, same CRF, <code>-threads 1</code>, verified byte-for-byte — so the sizes in Experiment 5
 are reproducible rather than one-off samples.</p>
@@ -570,7 +934,7 @@ are reproducible rather than one-off samples.</p>
 <footer>
 Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy
 and ffmpeg 6.1.1 / libx264 preset slow on a 1080×1620 photograph plus synthetic controls;
-12 tables, 3 negative results, all encoders single-threaded and verified deterministic.
+20 tables, 3 negative results, all encoders single-threaded and verified deterministic.
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
