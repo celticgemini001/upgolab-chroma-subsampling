@@ -300,7 +300,8 @@ remux and a rescale re-encode; no decoder tested applies it — the 1-byte size 
 bit pattern, not picture data. Scope: libx264, one frame, ffmpeg 6.1.1's swscale; a hardware decoder
 that honours the VUI could differ.</p>
 
-<pre><code># luma pixel i spans [i, i+1); chroma sample j sits at luma coord 2j + c
+<pre><code># CONTINUES the snippet below -- run ycbcr(), sub420() and psnr() from there first.
+# luma pixel i spans [i, i+1); chroma sample j sits at luma coord 2j + c
 #   c = 1.0 -> centred (x264/JPEG)      c = 0.5 -> left (MPEG-2)
 SITING = {"centre": 1.0, "left": 0.5}
 
@@ -565,7 +566,7 @@ adopting it; a 5 dB chroma gain that sits under the rounding error of your deliv
 number, not a result.</p>
 </div>
 
-<h2>Experiment 10 — the subsampling grid is not square, and most advice ignores that</h2>
+<h2>Experiment 10 — the subsampling grid is not square, and the loss has an exact closed form</h2>
 
 <p>4:2:0 halves both axes. 4:2:2 halves only the horizontal one. That asymmetry is the whole reason
 4:2:2 exists for video and 4:2:0 exists for delivery, but the usual summary — "4:2:2 is halfway
@@ -574,87 +575,95 @@ between 4:2:0 and 4:4:4" — is wrong in a way that has practical consequences. 
 depending on which way your chroma detail runs.</p>
 
 <p>Test it directly. A sinusoidal chroma pattern, amplitude 50 codes, on a flat 128 luma, swept over
-eleven periods and averaged over 24 phases so the result does not depend on where the pattern lands
-relative to the sample grid. Amplitude retention after the format's box filter, as a percentage of
-the pre-filter amplitude:</p>
+eleven periods and averaged over 48 phases so the result cannot depend on where the pattern lands
+relative to the sample grid. Amplitude is measured by least-squares projection onto a sinusoid of the
+known period, which is exact for a clean sinusoid at any phase — validated against a known amplitude
+of 50 before any filtering is applied, to 0.02 codes.</p>
 
 <table>
-<thead><tr><th class="num">period</th><th class="num">cyc/px</th><th class="num">4:2:2<br>along X</th><th class="num">4:2:0<br>along X</th><th class="num">4:2:2<br>along Y</th><th class="num">4:2:0<br>along Y</th></tr></thead>
+<thead><tr><th class="num">period</th><th class="num">cyc/px</th><th class="num">4:2:2<br>along X</th><th class="num">4:2:0<br>along X</th><th class="num">4:2:2<br>along Y</th><th class="num">4:2:0<br>along Y</th><th class="num">|cos(πf)|</th></tr></thead>
 <tbody>
-<tr><td class="num">5 px</td><td class="num">0.2000</td><td class="num">80.90%</td><td class="num">80.90%</td><td class="num"><strong>100.00%</strong></td><td class="num">80.90%</td></tr>
-<tr><td class="num">6 px</td><td class="num">0.1667</td><td class="num">75.00%</td><td class="num">75.00%</td><td class="num"><strong>100.00%</strong></td><td class="num">75.00%</td></tr>
-<tr><td class="num">8 px</td><td class="num">0.1250</td><td class="num">85.36%</td><td class="num">85.36%</td><td class="num"><strong>100.00%</strong></td><td class="num">85.36%</td></tr>
-<tr><td class="num">10 px</td><td class="num">0.1000</td><td class="num">90.45%</td><td class="num">90.45%</td><td class="num"><strong>100.00%</strong></td><td class="num">90.45%</td></tr>
-<tr><td class="num">12 px</td><td class="num">0.0833</td><td class="num">93.30%</td><td class="num">93.30%</td><td class="num"><strong>100.00%</strong></td><td class="num">93.30%</td></tr>
-<tr><td class="num">16 px</td><td class="num">0.0625</td><td class="num">96.19%</td><td class="num">96.19%</td><td class="num"><strong>100.00%</strong></td><td class="num">96.19%</td></tr>
-<tr><td class="num">24 px</td><td class="num">0.0417</td><td class="num">98.30%</td><td class="num">98.30%</td><td class="num"><strong>100.00%</strong></td><td class="num">98.30%</td></tr>
-<tr><td class="num">32 px</td><td class="num">0.0312</td><td class="num">99.04%</td><td class="num">99.04%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.04%</td></tr>
-<tr><td class="num">48 px</td><td class="num">0.0208</td><td class="num">99.57%</td><td class="num">99.57%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.57%</td></tr>
-<tr><td class="num">96 px</td><td class="num">0.0104</td><td class="num">100.01%</td><td class="num">100.01%</td><td class="num"><strong>100.00%</strong></td><td class="num">100.02%</td></tr>
+<tr><td class="num">5 px</td><td class="num">0.2000</td><td class="num">80.90%</td><td class="num">80.90%</td><td class="num"><strong>100.00%</strong></td><td class="num">80.90%</td><td class="num">80.90%</td></tr>
+<tr><td class="num">6 px</td><td class="num">0.1667</td><td class="num">86.60%</td><td class="num">86.60%</td><td class="num"><strong>100.00%</strong></td><td class="num">86.60%</td><td class="num">86.60%</td></tr>
+<tr><td class="num">8 px</td><td class="num">0.1250</td><td class="num">92.39%</td><td class="num">92.39%</td><td class="num"><strong>100.00%</strong></td><td class="num">92.39%</td><td class="num">92.39%</td></tr>
+<tr><td class="num">10 px</td><td class="num">0.1000</td><td class="num">95.11%</td><td class="num">95.11%</td><td class="num"><strong>100.00%</strong></td><td class="num">95.11%</td><td class="num">95.11%</td></tr>
+<tr><td class="num">12 px</td><td class="num">0.0833</td><td class="num">96.59%</td><td class="num">96.59%</td><td class="num"><strong>100.00%</strong></td><td class="num">96.59%</td><td class="num">96.59%</td></tr>
+<tr><td class="num">16 px</td><td class="num">0.0625</td><td class="num">98.08%</td><td class="num">98.08%</td><td class="num"><strong>100.00%</strong></td><td class="num">98.08%</td><td class="num">98.08%</td></tr>
+<tr><td class="num">24 px</td><td class="num">0.0417</td><td class="num">99.14%</td><td class="num">99.14%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.14%</td><td class="num">99.14%</td></tr>
+<tr><td class="num">32 px</td><td class="num">0.0312</td><td class="num">99.52%</td><td class="num">99.52%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.52%</td><td class="num">99.52%</td></tr>
+<tr><td class="num">48 px</td><td class="num">0.0208</td><td class="num">99.79%</td><td class="num">99.79%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.79%</td><td class="num">99.79%</td></tr>
+<tr><td class="num">96 px</td><td class="num">0.0104</td><td class="num">99.95%</td><td class="num">99.95%</td><td class="num"><strong>100.00%</strong></td><td class="num">99.95%</td><td class="num">99.95%</td></tr>
 </tbody>
 </table>
 
 <p>Two columns are identical to the digit at every period: 4:2:2 along X and 4:2:0 along X. Both
 apply a 2× box to the horizontal axis and the vertical axis never enters. And 4:2:2 along Y is
-100.00% at every period, because 4:2:2 does not touch the vertical axis at all — it is a lossless
-pass-through for chroma detail that runs horizontally on screen.</p>
+100.00% at every period, because 4:2:2 does not touch the vertical axis at all — at the format level
+it is a pass-through for chroma detail oriented along Y.</p>
 
 <p>So the "halfway" description is only true in bytes, and even then only loosely. Measured at CRF 20,
 4:2:2 costs 1.036× the 4:2:0 file on a photographic frame and 1.050× on a chroma-heavy one — barely
 more than 4:2:0. On pure synthetic chroma patterns with nothing else to code, the ratio rises to
-1.15–1.21× because chroma is the entire bitrate. And in that same sweep, 4:2:2 along Y retained
-100.00% at every period, because 4:2:2 does not touch the vertical axis at all — at the format level
-it is a pass-through for chroma detail oriented along Y. So it is not a compromise between two
-qualities; it is a choice about which axis you are willing to lose, priced much closer to 4:2:0 than
-the "halfway" framing suggests.</p>
+1.15–1.21× because chroma is the entire bitrate. So it is not a compromise between two qualities; it
+is a choice about which axis you are willing to lose, priced much closer to 4:2:0 than the "halfway"
+framing suggests.</p>
 
-<h3>The response tracks the box filter, up to the point where it does not</h3>
+<h3>The loss is not approximately known — it is exactly |cos(πf)|</h3>
 
-<p>The retention values sit close to the closed form for a 2× box — <code>|sinc(2f)|</code> with
-sinc(x) = sin(πx)/(πx) — which is a useful check that the sweep is measuring the format and not
-something incidental:</p>
+<p>The retention column above is not a fitted curve. For a 2-tap box, writing
+<code>y[n] = (x[2n] + x[2n+1])/2</code> with <code>x[m] = sin(2πfm + φ)</code> gives, by the
+sum-to-product identity,</p>
+
+<pre><code>y[n] = cos(πf) · sin(2πf·2n + φ + πf)</code></pre>
+
+<p>The output is the same sinusoid at twice the normalised frequency, scaled by
+<code>cos(πf)</code> and shifted in phase — for <em>every</em> f and <em>every</em> φ. So amplitude
+retention is <code>|cos(πf)|</code> exactly, with no phase dependence and no approximation, and the
+measured column reproduces it to <strong>0.000 percentage points</strong> at all eleven periods.
+Note this is the DTFT magnitude of the two-tap kernel <code>[½, ½]</code>, which is
+<code>|cos(πf)|</code> — not <code>|sinc(2f)|</code>, the response of an ideal box in the
+continuous domain. Those two differ by up to 5 pp in this range (75.68% vs 80.90% at 0.2 cyc/px),
+and using the sinc form would overstate the loss.</p>
+
+<p>Two consequences fall out immediately. At 0.25 cyc/px — exactly the chroma Nyquist — the law
+gives <code>|cos(π/4)| = 70.71%</code>. And because the law is monotone in f with no term that can
+exceed 1, <strong>a 2-tap box can never amplify.</strong> Any number above 100% is an estimator
+artifact, not a property of the format. A periodic signal sampled at exactly two samples per period
+can look larger or smaller depending on where you start counting; that is the measurement lying, not
+the filter.</p>
+
+<h3>Above chroma Nyquist: the amplitude obeys the same law, the frequency folds</h3>
+
+<p>Push past 0.25 cyc/px and the pattern aliases, but not into undefined territory. The output
+frequency <code>2f</code> exceeds 0.5 and folds back to <code>1 − 2f</code>, while the amplitude
+still follows <code>|cos(πf)|</code>:</p>
 
 <table>
-<thead><tr><th class="num">cyc/px</th><th class="num">|sinc(2f)| predicts</th><th class="num">measured 4:2:0</th><th class="num">gap</th></tr></thead>
+<thead><tr><th class="num">period</th><th class="num">f, cyc/px</th><th class="num">folds to</th><th class="num">measured</th><th class="num">|cos(πf)|</th></tr></thead>
 <tbody>
-<tr><td class="num">0.0104</td><td class="num">99.93%</td><td class="num">100.01%</td><td class="num">+0.08</td></tr>
-<tr><td class="num">0.0208</td><td class="num">99.72%</td><td class="num">99.57%</td><td class="num">−0.15</td></tr>
-<tr><td class="num">0.0417</td><td class="num">98.86%</td><td class="num">98.30%</td><td class="num">−0.56</td></tr>
-<tr><td class="num">0.0625</td><td class="num">97.45%</td><td class="num">96.19%</td><td class="num">−1.26</td></tr>
-<tr><td class="num">0.0833</td><td class="num">95.50%</td><td class="num">93.30%</td><td class="num">−2.20</td></tr>
-<tr><td class="num">0.1000</td><td class="num">93.55%</td><td class="num">90.45%</td><td class="num">−3.10</td></tr>
-<tr><td class="num">0.1250</td><td class="num">90.03%</td><td class="num">85.36%</td><td class="num">−4.67</td></tr>
-<tr><td class="num">0.1667</td><td class="num">82.69%</td><td class="num">75.00%</td><td class="num">−7.69</td></tr>
+<tr><td class="num">4.0 px</td><td class="num">0.2500</td><td class="num">0.5000</td><td class="num">70.71%</td><td class="num">70.71%</td></tr>
+<tr><td class="num">3.6 px</td><td class="num">0.2778</td><td class="num">0.4444</td><td class="num">64.28%</td><td class="num">64.28%</td></tr>
+<tr><td class="num">3.2 px</td><td class="num">0.3125</td><td class="num">0.3750</td><td class="num">55.56%</td><td class="num">55.56%</td></tr>
+<tr><td class="num">3.0 px</td><td class="num">0.3333</td><td class="num">0.3333</td><td class="num">50.00%</td><td class="num">50.00%</td></tr>
+<tr><td class="num">2.5 px</td><td class="num">0.4000</td><td class="num">0.2000</td><td class="num">30.90%</td><td class="num">30.90%</td></tr>
 </tbody>
 </table>
 
-<p>The gap widens monotonically as frequency climbs, and that is not measurement error. The two-sided
-sinc is the response of a box filter that can sample the negative lobe of the sine; a decimator that
-first low-passes with a half-band filter before taking every second sample cannot, and loses more
-near the cutoff. Every real encoder low-passes. So the closed form is an upper bound on retention,
-optimistic by 8 percentage points at 0.167 cyc/px and negligible below 0.04.</p>
+<p>This is the honest version of "aliasing makes fine chroma unpredictable". It is not unpredictable:
+the amplitude is deterministic and known in closed form, and only the <em>frequency</em> is wrong —
+detail above 0.25 cyc/px reappears as a lower-frequency pattern, which is why fine chroma texture
+behaves like moiré. What varies with phase is where the beat pattern lands, not how much survives.</p>
 
-<h3>At exactly the chroma Nyquist, the number stops being a number</h3>
-
-<p>Step to a 4-pixel period — the chroma grid's Nyquist limit — and phase averaging stops being
-cosmetic. Same sine, amplitude 50, 24 phases:</p>
-
-<table>
-<thead><tr><th class="num">period</th><th class="num">minimum</th><th class="num">maximum</th><th class="num">mean</th><th class="num">spread</th></tr></thead>
-<tbody>
-<tr><td class="num">8 px</td><td class="num">146.6%</td><td class="num">183.2%</td><td class="num">166.8%</td><td class="num">36.6 pp</td></tr>
-<tr><td class="num">6 px</td><td class="num">129.9%</td><td class="num">150.0%</td><td class="num">142.4%</td><td class="num">20.1 pp</td></tr>
-<tr><td class="num">4 px</td><td class="num"><strong>0.0%</strong></td><td class="num"><strong>141.4%</strong></td><td class="num">89.5%</td><td class="num"><strong>141.4 pp</strong></td></tr>
-</tbody>
-</table>
-
-<p>At 4 px the answer is anywhere from complete annihilation to 41% <em>amplification</em>, purely
-as a function of where the pattern sits relative to the sample grid. The mean of 89.5% is meaningless
-as a description of any individual case. This is aliasing, and it is why fine chroma texture —
-tightly-spaced colour stripes, thin saturated details, moiré-prone fabric — behaves unpredictably
-under 4:2:0: not a consistent softening but a per-region lottery. Note also that two of the three
-rows exceed 100%: a 2× box on a near-Nyquist pattern can produce amplitude larger than the source's.
-Retention above 100% is the aliasing signature, and it is a defect even though it looks like a win.</p>
+<div class="callout">
+<p><strong>A trap worth stating, because I fell into it writing this page.</strong> Measuring
+amplitude with <code>percentile(99) − percentile(1)</code> looks harmless and is wrong for any
+periodic signal: at 5–6 samples per period the percentiles land between extrema, so a clean
+amplitude-50 sinusoid "measures" 86.60–95.11 instead of 50, and after decimation the error compounds.
+It under-reads the input and over-reads the output, which is how a table of retention values gets
+systematically too high — and how a <code>2 × 70.71%</code> ceiling turns into a published "141%
+amplification". Validate an amplitude estimator against a known sinusoid before trusting a sweep;
+least-squares projection is exact, percentile methods are not.</p>
+</div>
 
 <h3>A tool trap: ffmpeg's 4:2:0 → 4:4:4 upsample is nearest, not bilinear</h3>
 
@@ -672,15 +681,13 @@ in an image editor that shows you a smooth chroma gradient, the editor is interp
 and you are being shown detail the file does not contain. The blocky version is the honest one.</p>
 
 <div class="callout">
-<p><strong>What this changes in practice.</strong> If your footage has chroma structure that runs
-mostly one way — horizontal colour banding in a sky, an anamorphic squeeze, a graded background with
-vertical variation and no horizontal detail — 4:2:2 preserves it completely at the format level while
-4:2:0 loses 15–25% of the amplitude at 6–8 px periods. That is the case where paying the extra 4%
-bitrate is justified, and it is <em>not</em> the case the "halfway between" framing predicts. Check
-the orientation of the detail before choosing a format; a frame whose chroma detail is squared off in
-both axes gains nothing from 4:2:2 in the axis it keeps and still pays for it. Note also that this
-comparison is at the format level, before encoding: once libx264 runs, its own errors can dominate
-the 15–25% difference, so verify on your own footage rather than trusting the table.</p>
+<p><strong>What this changes in practice.</strong> Retention at a given period is
+<code>|cos(πf)|</code>, decided before any encoder runs — so you can predict the format's cost on
+your own footage in one line instead of measuring it. If your chroma structure runs mostly one way —
+horizontal colour banding in a sky, an anamorphic squeeze, a graded background with vertical
+variation and no horizontal detail — 4:2:2 keeps that axis at 100.00% for the price of ~4% more
+bytes. If the detail is squared off in both axes, 4:2:2 buys nothing on the axis it keeps and still
+costs you. Check the orientation before choosing a format.</p>
 </div>
 
 <h2>What to actually do</h2>
@@ -881,50 +888,61 @@ count and the identical md5, which is the clamp, not a plateau. Luma stays withi
 47.81 across the whole sweep, confirming the knob only touches chroma.</p>
 
 <p><strong>Experiment 10 — the subsampling grid is anisotropic.</strong> Amplitude retention of a
-sine through each format's box, averaged over 24 phases. Pure numpy, no encoder, so this is format
-loss in isolation. Note the axis bookkeeping: content varying along X needs a profile across
-<em>columns</em> (<code>mean(axis=0)</code>), which is the mistake worth making once.</p>
+sine through each format’s box, averaged over 48 phases. Pure numpy, no encoder, so this is
+format loss in isolation. Two things to get right: content varying along X needs a profile across
+<em>columns</em> (<code>mean(axis=0)</code>), and amplitude must be measured by least-squares
+projection on the <em>decimated</em> grid at the surviving period — percentile methods are not
+exact on a periodic signal, and the guard below is what catches that.</p>
 
 <pre><code>import numpy as np
 
 W, H = 1280, 720
-yy, xx = np.mgrid[0:H, 0:W].astype(float)
+xx = np.mgrid[0:H, 0:W].astype(float)[1]
 AMP = 50.0
 
-def box_h(c):                        # 4:2:2: horizontal box only
+
+def box_h(c):
     return c[:, :c.shape[1]//2*2].reshape(c.shape[0], -1, 2).mean(axis=2)
-def box_both(c):                     # 4:2:0: both axes
+
+
+def box_both(c):
     c = c[:c.shape[0]//2*2, :c.shape[1]//2*2]
-    return c.reshape(c.shape[0]//2, 2, c.shape[1]//2, 2).mean(axis=(1,3))
+    return c.reshape(c.shape[0]//2, 2, c.shape[1]//2, 2).mean(axis=(1, 3))
 
-def amp_x(c): p = c.mean(axis=0); return np.percentile(p,99) - np.percentile(p,1)
-def amp_y(c): p = c.mean(axis=1); return np.percentile(p,99) - np.percentile(p,1)
 
-for P in (4, 6, 8, 12, 16, 24, 32, 48, 96):
-    row = {}
-    for axis in ("X", "Y"):
-        A = amp_x if axis == "X" else amp_y
-        r422, r420 = [], []
-        for ph in np.linspace(0, 2*np.pi, 24, endpoint=False):
-            coord = xx if axis == "X" else yy
-            c = 128 + AMP*np.sin(2*np.pi*coord/P + ph)
-            a0 = A(c)
-            r422.append(100*A(box_h(c))/a0 if axis == "X" else 100.0)
-            r420.append(100*A(box_both(c))/a0)
-        row[axis] = (np.mean(r422), np.mean(r420), np.std(r420))
-    print(f"P={P:&gt;3} f={1/P:.4f} | X 422 {row['X'][0]:6.2f}% 420 {row['X'][1]:6.2f}% "
-          f"| Y 422 {row['Y'][0]:6.2f}% 420 {row['Y'][1]:6.2f}% (sd {row['Y'][2]:.1f})")
+def amp(prof, period):
+    # least-squares amplitude -- exact for a clean sinusoid, any phase.
+    # Needs &gt;=4 samples per period; below that cos/sin are collinear and the
+    # fit explodes instead of failing, so guard it.
+    assert len(prof) / period &gt;= 4, (len(prof), period)
+    n = np.arange(len(prof))
+    w = 2*np.pi*n/period
+    A = np.column_stack([np.ones_like(w), np.cos(w), np.sin(w)])
+    coef, *_ = np.linalg.lstsq(A, prof - prof.mean(), rcond=None)
+    return float(np.hypot(coef[1], coef[2]))
 
-# closed-form check: a 2x box is |sinc(2f)| = |sin(2*pi*f)/(2*pi*f)|
-for f in (0.0208, 0.0625, 0.1250, 0.1667):
-    print(f, abs(np.sin(2*np.pi*f)/(2*np.pi*f)))</code></pre>
 
-<p><strong>Expected output.</strong> The 4:2:2-along-Y column is 100.00% at every period, and the
-4:2:2-along-X column equals the 4:2:0-along-X column to two decimals — 4:2:2 never touches the
-vertical axis, so vertical chroma detail is a pass-through. The sine-sweep values sit below
-<code>|sinc(2f)|</code> and the gap widens with frequency (−0.15 pp at 0.021 cyc/px, −7.7 pp at
-0.167), because a real decimator low-passes before dropping samples and a two-sided sinc cannot.
-At P=4 the standard deviation across phases is larger than the mean is meaningful.</p>
+for P in (5, 6, 8, 12, 16, 24, 48, 96):
+    # after the box the sinusoid survives at period P/2 OUTPUT pixels, so
+    # measure there: input and output then have the same samples/period.
+    r422, r420 = [], []
+    for ph in np.linspace(0, 2*np.pi, 48, endpoint=False):
+        c = 128 + AMP*np.sin(2*np.pi*xx/P + ph)
+        a0 = amp(c.mean(axis=0), P)
+        r422.append(100*amp(box_h(c).mean(axis=0), P/2)/a0)
+        r420.append(100*amp(box_both(c).mean(axis=0), P/2)/a0)
+    print(f&quot;P={P:&gt;3} f={1/P:.4f}  422 {np.mean(r422):6.2f}%  420 {np.mean(r420):6.2f}%  &quot;
+          f&quot;|cos(pi f)| {100*abs(np.cos(np.pi/P)):6.2f}%&quot;)</code></pre>
+
+<p><strong>Expected output.</strong> The 4:2:2 and 4:2:0 columns are identical to two decimals —
+4:2:2 boxes X only, and here the pattern also varies along X, so it does exactly what 4:2:0 does on
+that axis. Both match <code>|cos(πf)|</code> to the printed digit at every period: 80.90% at 0.2
+cyc/px, 92.39% at 0.125, 99.79% at 0.021. Run the same sweep with the pattern varying along Y instead
+and 4:2:2 returns 100.00% at every period while 4:2:0 is unchanged. The <code>assert</code> on the
+estimator is the load-bearing line: swap <code>amp</code> for
+<code>percentile(prof,99)-percentile(prof,1)</code> and a clean amplitude-50 sinusoid "measures"
+86.60 at 6 px — which is how a retention table ends up systematically too high, and how 70.71%
+becomes a published 141%.</p>
 
 <p>Both encodes used for the byte comparison are bit-identical across repeated runs — same
 command, same CRF, <code>-threads 1</code>, verified byte-for-byte — so the sizes in Experiment 5
@@ -934,7 +952,9 @@ are reproducible rather than one-off samples.</p>
 <footer>
 Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy
 and ffmpeg 6.1.1 / libx264 preset slow on a 1080×1620 photograph plus synthetic controls;
-20 tables, 3 negative results, all encoders single-threaded and verified deterministic.
+19 tables, 3 negative results, all encoders single-threaded and verified deterministic. Every
+reproduce snippet was executed before publication; the amplitude estimator was validated against a
+known sinusoid after a first draft got it wrong.
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
